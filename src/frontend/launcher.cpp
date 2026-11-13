@@ -10,6 +10,7 @@
 extern "C" {
 #include "frontend/debug.h"
 #include "gfx/gl.h"
+#include "gfx/rhi.h"
 }
 
 #define NW_LAUNCHER_MENUS 16
@@ -233,6 +234,11 @@ static bool nw_launcher_button(const char *label, bool chosen, ImVec2 size, floa
     ImFont *font = ImGui::GetFont();
     float fs = size.y * 0.52f;
     ImVec2 ext = font->CalcTextSizeA(fs, FLT_MAX, 0.0f, label);
+    float room = b.x - a.x - 34.0f * s; /* long names shrink to fit the button */
+    if (ext.x > room && ext.x > 0.0f) {
+        fs *= room / ext.x;
+        ext = font->CalcTextSizeA(fs, FLT_MAX, 0.0f, label);
+    }
     ImVec2 tp(a.x + 22.0f * s, a.y + (size.y - ext.y) * 0.5f);
     dl->AddText(font, fs, ImVec2(tp.x + 2 * s, tp.y + 2 * s), nw_col(NW_OUTLINE, 0.8f), label);
     dl->AddText(font, fs, tp, nw_col(hot ? NW_OUTLINE : NW_CREAM), label);
@@ -277,6 +283,10 @@ static void nw_launcher_page(const NwLauncherMenu *m)
 static void nw_launcher_shot(SDL_Window *window, const char *path)
 {
     int w, h;
+    if (nw_rhi_kind() != NW_RHI_OPENGL) {
+        SDL_Log("launcher: shot %s: only with the OpenGL renderer", path);
+        return;
+    }
     SDL_GetWindowSizeInPixels(window, &w, &h);
     SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ABGR8888);
     if (!s) {
@@ -335,9 +345,18 @@ NwLauncherResult nw_launcher_run(SDL_Window *window, const char *version, NwLaun
         }
         int width, height;
         SDL_GetWindowSizeInPixels(window, &width, &height);
-        glViewport(0, 0, width, height);
-        glClearColor(0.07f, 0.02f, 0.16f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        nw_rhi_set_target(NULL, NULL);
+        nw_rhi_viewport(0, 0, width, height);
+        NwRhiClear clear = {};
+        clear.colour = clear.depth = true;
+        clear.rgba[0] = 0.07f;
+        clear.rgba[1] = 0.02f;
+        clear.rgba[2] = 0.16f;
+        clear.rgba[3] = 1.0f;
+        clear.z = 1.0;
+        clear.mask[0] = clear.mask[1] = clear.mask[2] = clear.mask[3] = true;
+        clear.depth_write = true;
+        nw_rhi_clear(&clear);
 
         nw_ui_begin();
         nw_launcher_backdrop();
@@ -428,7 +447,7 @@ NwLauncherResult nw_launcher_run(SDL_Window *window, const char *version, NwLaun
                 result = SDL_strcmp(shot_exit, "play") == 0 ? NW_LAUNCHER_PLAY : NW_LAUNCHER_QUIT;
             }
         }
-        SDL_GL_SwapWindow(window);
+        nw_rhi_present();
     }
     io.ConfigFlags = flags;
     io.ClearInputKeys();
