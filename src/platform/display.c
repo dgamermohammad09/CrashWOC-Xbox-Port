@@ -126,7 +126,7 @@ NwResolution nw_display_fullscreen(SDL_Window *window, NwWindowMode mode, NwReso
     return desktop ? nw_display_pixels(desktop) : (NwResolution){ 0, 0 };
 }
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NW_UWP)
 static HWND nw_display_hwnd(SDL_Window *window, RECT *monitor)
 {
     MONITORINFO mi = { .cbSize = sizeof(mi) };
@@ -143,7 +143,7 @@ static HWND nw_display_hwnd(SDL_Window *window, RECT *monitor)
 
 void nw_display_compose(SDL_Window *window)
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NW_UWP)
     RECT m, r;
     HWND hwnd = nw_display_hwnd(window, &m);
     if (hwnd && GetWindowRect(hwnd, &r) && EqualRect(&r, &m)) {
@@ -158,7 +158,7 @@ void nw_display_compose(SDL_Window *window)
 void nw_display_size(SDL_Window *window, int *w, int *h)
 {
     SDL_GetWindowSizeInPixels(window, w, h);
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NW_UWP)
     RECT m;
     if (nw_display_hwnd(window, &m) && *w == m.right - m.left + 1) {
         (*w)--;

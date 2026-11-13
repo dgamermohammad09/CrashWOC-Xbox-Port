@@ -47,6 +47,11 @@ struct NwWizard {
     GLuint shot; /* the welcome page's debug menu screenshot, 0 = not loaded */
     int shot_w, shot_h;
     bool zoom; /* the screenshot fills the window */
+#ifdef NW_UWP
+    char **usb; /* disc images on removable drives (Xbox): full paths */
+    size_t nusb;
+    Uint64 usb_scanned;
+#endif
 };
 
 static const SDL_DialogFileFilter nw_wizard_filters[] = {
@@ -152,6 +157,12 @@ void nw_wizard_destroy(NwWizard *w)
     }
     nw_import_free(w->job);
     nw_import_list_free(&w->list);
+#ifdef NW_UWP
+    for (size_t i = 0; i < w->nusb; i++) {
+        SDL_free(w->usb[i]);
+    }
+    SDL_free(w->usb);
+#endif
     if (w->shot) {
         glDeleteTextures(1, &w->shot);
     }
@@ -216,6 +227,52 @@ static void nw_wizard_align_right(const char *const *labels, int count)
     }
 }
 
+#ifdef NW_UWP
+#define NW_WIZARD_USB_RESCAN_MS 5000
+
+/* Xbox: the drive roots D: to Z: and their NuWorld and CrashWOC folders. The app can read a USB drive when its
+   NTFS permissions let app packages in (xbox/README.md), or when it is FAT32/exFAT. */
+static void nw_wizard_scan_usb(NwWizard *w)
+{
+    static const char *const subs[] = { "", "NuWorld\\", "CrashWOC\\" };
+    for (size_t i = 0; i < w->nusb; i++) {
+        SDL_free(w->usb[i]);
+    }
+    SDL_free(w->usb);
+    w->usb = NULL;
+    w->nusb = 0;
+    size_t cap = 0;
+    for (char letter = 'D'; letter <= 'Z'; letter++) {
+        for (size_t s = 0; s < SDL_arraysize(subs); s++) {
+            char dir[64];
+            SDL_snprintf(dir, sizeof(dir), "%c:\%s", letter, subs[s]);
+            if (s == 0 && !SDL_GetPathInfo(dir, NULL)) {
+                break; /* no such drive */
+            }
+            NwImageList list;
+            if (!nw_import_scan(dir, &list)) {
+                continue;
+            }
+            for (size_t i = 0; i < list.count; i++) {
+                if (w->nusb == cap) {
+                    cap = cap ? cap * 2 : 8;
+                    char **grown = (char **)SDL_realloc(w->usb, cap * sizeof(*grown));
+                    if (!grown) {
+                        break;
+                    }
+                    w->usb = grown;
+                }
+                char *path = NULL;
+                if (SDL_asprintf(&path, "%s%s", dir, list.names[i]) >= 0) {
+                    w->usb[w->nusb++] = path;
+                }
+            }
+            nw_import_list_free(&list);
+        }
+    }
+}
+#endif
+
 static NwWizardResult nw_wizard_pick(NwWizard *w)
 {
     NwWizardResult result = NW_WIZARD_OPEN;
@@ -227,6 +284,12 @@ static NwWizardResult nw_wizard_pick(NwWizard *w)
         }
         w->scanned = now ? now : 1;
     }
+#ifdef NW_UWP
+    if (!w->usb_scanned || now - w->usb_scanned >= NW_WIZARD_USB_RESCAN_MS) {
+        nw_wizard_scan_usb(w);
+        w->usb_scanned = now ? now : 1;
+    }
+#endif
 
     nw_wizard_title("Welcome");
     ImGui::TextWrapped("NuWorld needs a disc image of your own copy of the game:");
@@ -240,6 +303,43 @@ static NwWizardResult nw_wizard_pick(NwWizard *w)
         nw_wizard_wrapped(nw_wizard_warn, w->notice);
     }
 
+#ifdef NW_UWP
+    nw_wizard_heading("USB drive");
+    ImGui::TextWrapped("Put the image on a USB drive, at its root or in a folder named NuWorld. It shows up here.");
+    const ImGuiTableFlags usb_table = ImGuiTableFlags_BordersOuter | ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX;
+    if (ImGui::BeginTable("usb", 2, usb_table)) {
+        ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("action", ImGuiTableColumnFlags_WidthFixed);
+        for (size_t i = 0; i < w->nusb; i++) {
+            ImGui::PushID((int)(1000 + i));
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextWrapped("%s", w->usb[i]);
+            ImGui::TableNextColumn();
+            if (ImGui::Button("Import")) {
+                char *path = SDL_strdup(w->usb[i]);
+                if (path) {
+                    nw_wizard_start(w, path);
+                    SDL_free(path);
+                }
+            }
+            ImGui::PopID();
+        }
+        if (!w->nusb) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("No disc images on a USB drive.");
+        }
+        ImGui::EndTable();
+    }
+    nw_wizard_heading("Import folder");
+    ImGui::TextWrapped("Or upload it into this folder with the Xbox Device Portal (File explorer, LocalState).");
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+    ImGui::TextWrapped("%s", w->import_dir);
+    ImGui::PopStyleColor();
+#else
     nw_wizard_heading("Disc image");
     ImGui::BeginDisabled(!w->dialog_event);
     if (ImGui::Button("Choose file...")) {
@@ -259,6 +359,7 @@ static NwWizardResult nw_wizard_pick(NwWizard *w)
     if (ImGui::Button("Open folder")) {
         nw_wizard_open_folder(w->import_dir);
     }
+#endif
 
     const ImGuiTableFlags table = ImGuiTableFlags_BordersOuter | ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX;
     if (ImGui::BeginTable("images", 2, table)) {

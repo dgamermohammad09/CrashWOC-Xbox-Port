@@ -4,6 +4,22 @@
 
 #include "audio/spu2.h"
 
+#ifdef NW_UWP
+/* Xbox: SDL's WASAPI device never finishes opening in this app (its activation waits on the UI thread), so the
+   stream has no device and a thread of ours hands it to XAudio2, 10 ms at a time. */
+#define COBJMACROS
+#include <windows.h>
+#include <xaudio2.h>
+
+#define NW_XA_BUFFERS 4
+#define NW_XA_FRAMES 480
+
+static struct {
+    SDL_Thread *thread;
+    SDL_AtomicInt run;
+} nw_xa;
+#endif
+
 #define NW_AUDIO_RATE 48000
 #define NW_AUDIO_FRAME (2 * sizeof(float))
 #define NW_AUDIO_TARGET_MS 60 /* queued ahead of the device */
@@ -72,26 +88,107 @@ static void nw_audio_out(void *user, const int16_t *frames, unsigned count)
     SDL_UnlockMutex(nw_audio.lock);
 }
 
+#ifdef NW_UWP
+static int SDLCALL nw_xa_feed(void *data)
+{
+    static float bufs[NW_XA_BUFFERS][NW_XA_FRAMES * 2];
+    const WAVEFORMATEX fmt = { WAVE_FORMAT_IEEE_FLOAT, 2, NW_AUDIO_RATE, NW_AUDIO_RATE * NW_AUDIO_FRAME,
+                               NW_AUDIO_FRAME, 32, 0 };
+    IXAudio2 *xa = NULL;
+    IXAudio2MasteringVoice *master = NULL;
+    IXAudio2SourceVoice *voice = NULL;
+    HRESULT hr;
+    int next = 0;
+    (void)data;
+
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    if (FAILED(hr = XAudio2Create(&xa, 0, XAUDIO2_DEFAULT_PROCESSOR)) ||
+        FAILED(hr = IXAudio2_CreateMasteringVoice(xa, &master, 2, NW_AUDIO_RATE, 0, NULL, NULL,
+                                                  AudioCategory_GameEffects)) ||
+        FAILED(hr = IXAudio2_CreateSourceVoice(xa, &voice, &fmt, 0, 2.0f, NULL, NULL, NULL)) ||
+        FAILED(hr = IXAudio2SourceVoice_Start(voice, 0, XAUDIO2_COMMIT_NOW))) {
+        SDL_Log("audio: XAudio2 failed (0x%08lx), no sound", (unsigned long)hr);
+        goto done;
+    }
+    SDL_Log("audio: XAudio2, %d Hz", NW_AUDIO_RATE);
+    while (SDL_GetAtomicInt(&nw_xa.run)) {
+        XAUDIO2_VOICE_STATE state;
+        IXAudio2SourceVoice_GetState(voice, &state, XAUDIO2_VOICE_NOSAMPLESPLAYED);
+        if (state.BuffersQueued >= NW_XA_BUFFERS - 1) {
+            SDL_Delay(2);
+            continue;
+        }
+        float *b = bufs[next];
+        int got = 0;
+        SDL_LockMutex(nw_audio.lock);
+        float gain = nw_audio.master;
+        if (nw_audio.stream) {
+            got = SDL_GetAudioStreamData(nw_audio.stream, b, (int)sizeof(bufs[0]));
+        }
+        SDL_UnlockMutex(nw_audio.lock);
+        got = got < 0 ? 0 : got;
+        SDL_memset((char *)b + got, 0, sizeof(bufs[0]) - (size_t)got);
+        for (int i = 0; i < NW_XA_FRAMES * 2; i++) {
+            b[i] *= gain;
+        }
+        XAUDIO2_BUFFER xb;
+        SDL_zero(xb);
+        xb.AudioBytes = sizeof(bufs[0]);
+        xb.pAudioData = (const BYTE *)b;
+        IXAudio2SourceVoice_SubmitSourceBuffer(voice, &xb, NULL);
+        next = (next + 1) % NW_XA_BUFFERS;
+    }
+done:
+    if (voice) {
+        IXAudio2SourceVoice_DestroyVoice(voice);
+    }
+    if (master) {
+        IXAudio2MasteringVoice_DestroyVoice(master);
+    }
+    if (xa) {
+        IXAudio2_Release(xa);
+    }
+    CoUninitialize();
+    return 0;
+}
+#endif
+
 /* Before the game thread starts: the SPU's output is set once. */
 bool nw_audio_open(void)
 {
     const SDL_AudioSpec spec = { SDL_AUDIO_F32, 2, NW_AUDIO_RATE };
 
+#ifdef NW_UWP
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy"); /* streams only, no WASAPI */
+#endif
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         return false;
     }
     if (!nw_audio.lock && !(nw_audio.lock = SDL_CreateMutex())) {
         return false;
     }
+#ifdef NW_UWP
+    SDL_AudioStream *stream = SDL_CreateAudioStream(&spec, &spec);
+#else
     SDL_AudioStream *stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+#endif
     if (!stream) {
         return false;
     }
     SDL_LockMutex(nw_audio.lock);
     nw_audio.stream = stream;
+#ifndef NW_UWP
     SDL_SetAudioStreamGain(stream, nw_audio.master);
+#endif
     SDL_UnlockMutex(nw_audio.lock);
+#ifdef NW_UWP
+    if (!nw_xa.thread) {
+        SDL_SetAtomicInt(&nw_xa.run, 1);
+        nw_xa.thread = SDL_CreateThread(nw_xa_feed, "nw_xaudio2", NULL);
+    }
+#else
     SDL_ResumeAudioStreamDevice(stream);
+#endif
     nw_spu2_set_output(nw_audio_out, NULL);
     return true;
 }
@@ -103,9 +200,11 @@ void nw_audio_set_buses(int master, int voice)
         SDL_LockMutex(nw_audio.lock);
     }
     nw_audio.master = (float)SDL_clamp(master, 0, 100) / 100.0f;
+#ifndef NW_UWP /* the XAudio2 feeder applies it */
     if (nw_audio.stream) {
         SDL_SetAudioStreamGain(nw_audio.stream, nw_audio.master);
     }
+#endif
     if (nw_audio.lock) {
         SDL_UnlockMutex(nw_audio.lock);
     }
@@ -117,6 +216,13 @@ void nw_audio_close(void)
     if (!nw_audio.lock) {
         return;
     }
+#ifdef NW_UWP
+    if (nw_xa.thread) {
+        SDL_SetAtomicInt(&nw_xa.run, 0);
+        SDL_WaitThread(nw_xa.thread, NULL);
+        nw_xa.thread = NULL;
+    }
+#endif
     SDL_LockMutex(nw_audio.lock);
     SDL_DestroyAudioStream(nw_audio.stream);
     nw_audio.stream = NULL;

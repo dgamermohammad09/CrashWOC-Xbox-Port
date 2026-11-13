@@ -267,6 +267,10 @@ static void nw_log_crash_install(void)
    the exe or, with --console, to a new one. */
 static void nw_log_console(bool open)
 {
+#ifdef NW_UWP
+    (void)open; /* no console in an Xbox app: the log file is all there is */
+    return;
+#endif
     bool out = GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_UNKNOWN;
     bool err = GetFileType(GetStdHandle(STD_ERROR_HANDLE)) == FILE_TYPE_UNKNOWN;
     if (!(out || err) || !(AttachConsole(ATTACH_PARENT_PROCESS) || (open && AllocConsole()))) {

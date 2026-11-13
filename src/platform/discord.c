@@ -217,7 +217,12 @@ typedef HANDLE NwIpc;
 
 static NwIpc nw_ipc_open(const char *path)
 {
+#ifdef NW_UWP
+    (void)path; /* an Xbox app cannot reach the Discord client's pipe */
+    return NW_IPC_NONE;
+#else
     return CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+#endif
 }
 
 static bool nw_ipc_write(NwIpc ipc, const uint8_t *p, size_t n)
@@ -237,6 +242,10 @@ static bool nw_ipc_write(NwIpc ipc, const uint8_t *p, size_t n)
 static int nw_ipc_read(NwIpc ipc, uint8_t *p, size_t cap)
 {
     DWORD avail = 0, got = 0;
+#ifdef NW_UWP
+    (void)ipc;
+    return -1;
+#endif
     if (!PeekNamedPipe(ipc, NULL, 0, NULL, &avail, NULL)) {
         return -1;
     }

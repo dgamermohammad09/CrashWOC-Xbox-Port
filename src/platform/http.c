@@ -29,7 +29,7 @@ static bool nw_http_append(NwHttpBody *b, const void *p, size_t n)
     return true;
 }
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NW_UWP) /* an Xbox app has no WinHTTP: the libcurl path, which finds none */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winhttp.h>

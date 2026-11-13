@@ -19,8 +19,26 @@ option(NUWORLD_DECOMP "Generate and compile the decomp units (needs Python 3.11+
 option(NUWORLD_FUZZ "Build the libFuzzer targets for the VFS readers and the loaders (clang on Linux)" OFF)
 option(NUWORLD_SANITIZE "Build the port, the decomp and the tests with ASan and UBSan (clang)" OFF)
 set(NUWORLD_TAG "BETA" CACHE STRING "Release tag in the build ID (empty for a release without one)")
+# Xbox (Dev Mode) / UWP: the same exe, run in an AppContainer on the UWP build of SDL3 (CoreWindow, WGL on Mesa's
+# OpenGL-on-D3D12); see xbox/README.md.
+option(NUWORLD_UWP "Build for Xbox Dev Mode (UWP AppContainer) against SDL3-uwp" OFF)
+set(NUWORLD_UWP_SDL3_INCLUDE "" CACHE PATH "SDL3-uwp's include folder (NUWORLD_UWP)")
+set(NUWORLD_UWP_SDL3_LIB "" CACHE FILEPATH "SDL3-uwp's SDL3.lib (NUWORLD_UWP)")
 
-if(NUWORLD_SYSTEM_SDL3)
+if(NUWORLD_UWP)
+  if(NOT WIN32 OR NOT EXISTS "${NUWORLD_UWP_SDL3_LIB}" OR NOT EXISTS "${NUWORLD_UWP_SDL3_INCLUDE}/SDL3/SDL.h")
+    message(FATAL_ERROR "NUWORLD_UWP needs a Windows target, NUWORLD_UWP_SDL3_INCLUDE and NUWORLD_UWP_SDL3_LIB")
+  endif()
+  add_library(SDL3::SDL3 SHARED IMPORTED GLOBAL)
+  set_target_properties(SDL3::SDL3 PROPERTIES
+    IMPORTED_IMPLIB "${NUWORLD_UWP_SDL3_LIB}"
+    IMPORTED_LOCATION "${NUWORLD_UWP_SDL3_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${NUWORLD_UWP_SDL3_INCLUDE}")
+  # SDL_CreateThread passes the caller's _beginthreadex on Windows; the UWP SDL only takes NULL (its own threads).
+  add_compile_definitions(NW_UWP=1 SDL_BeginThreadFunction=NULL SDL_EndThreadFunction=NULL)
+  # Everything (libc++, libunwind, winpthreads) in the exe: the package carries no MinGW DLLs.
+  add_link_options(-static)
+elseif(NUWORLD_SYSTEM_SDL3)
   find_package(SDL3 REQUIRED CONFIG)
 else()
   include(FetchContent)
@@ -63,6 +81,10 @@ add_library(nuworld_imgui STATIC
   ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
 target_include_directories(nuworld_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_compile_definitions(nuworld_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+if(NUWORLD_UWP)
+  # Dear ImGui's Win32 defaults (clipboard, IME, ShellExecute) are desktop-only APIs; SDL's take their place.
+  target_compile_definitions(nuworld_imgui PUBLIC IMGUI_DISABLE_WIN32_FUNCTIONS IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS)
+endif()
 target_compile_options(nuworld_imgui PRIVATE -fno-exceptions -fno-rtti)
 target_link_libraries(nuworld_imgui PUBLIC SDL3::SDL3 ${CMAKE_DL_LIBS})
 
@@ -118,6 +140,9 @@ endif()
 target_include_directories(crashwoc-nuworld PRIVATE src)
 target_compile_options(crashwoc-nuworld PRIVATE -Wall -Wextra $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 target_link_libraries(crashwoc-nuworld PRIVATE nuworld_frontend nuworld_gfx nuworld_imgui nuworld_port SDL3::SDL3)
+if(NUWORLD_UWP)
+  target_link_libraries(crashwoc-nuworld PRIVATE xaudio2_9 ole32) # src/platform/audio.c's XAudio2 output
+endif()
 if(MINGW)
   # Keep the release a single .exe: libc++ (Dear ImGui) linked in, not libc++.dll.
   target_link_options(crashwoc-nuworld PRIVATE -static-libstdc++)
@@ -144,7 +169,7 @@ add_dependencies(nuworld_port nuworld_buildid)
 target_include_directories(nuworld_port PUBLIC src)
 target_compile_options(nuworld_port PRIVATE -Wall -Wextra)
 target_link_libraries(nuworld_port PUBLIC SDL3::SDL3)
-if(WIN32)
+if(WIN32 AND NOT NUWORLD_UWP)
   target_link_libraries(nuworld_port PUBLIC winhttp)
 endif()
 

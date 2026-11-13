@@ -15,31 +15,70 @@
       "name": "debug",
       "displayName": "Debug (clang)",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     },
     {
       "name": "release",
       "displayName": "Release (clang)",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     },
     {
       "name": "asan",
       "displayName": "ASan and UBSan (clang)",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "NUWORLD_SANITIZE": "ON" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "NUWORLD_SANITIZE": "ON"
+      }
     },
     {
       "name": "fuzz",
       "displayName": "libFuzzer, ASan, UBSan (clang)",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "NUWORLD_FUZZ": "ON", "NUWORLD_SANITIZE": "ON" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "NUWORLD_FUZZ": "ON",
+        "NUWORLD_SANITIZE": "ON"
+      }
+    },
+    {
+      "name": "xbox",
+      "displayName": "Xbox Dev Mode / UWP (llvm-mingw, SDL3-uwp)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "NUWORLD_UWP": "ON",
+        "NUWORLD_TESTS": "OFF",
+        "NUWORLD_UWP_SDL3_INCLUDE": "${sourceDir}/../deps/sdl3-uwp/include",
+        "NUWORLD_UWP_SDL3_LIB": "${sourceDir}/../deps/sdl3-uwp-out/SDL3-UWP/SDL3.lib"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "debug", "configurePreset": "debug" },
-    { "name": "release", "configurePreset": "release" },
-    { "name": "asan", "configurePreset": "asan" },
-    { "name": "fuzz", "configurePreset": "fuzz" }
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "fuzz",
+      "configurePreset": "fuzz"
+    },
+    {
+      "name": "xbox",
+      "configurePreset": "xbox"
+    }
   ]
 }

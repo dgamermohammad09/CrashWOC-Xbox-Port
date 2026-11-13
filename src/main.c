@@ -1,3 +1,6 @@
+#ifdef NW_UWP
+#include <io.h> /* _dup2 */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1427,13 +1430,17 @@ static int nw_scene_check_all(const char *exe, const char *data_dir)
             skipped++;
             continue;
         }
+        int code = 1;
+#ifdef NW_UWP
+        fprintf(stderr, NW_APP_NAME ": %s: no child processes in an Xbox app\n", e->path);
+#else
         const char *args[] = { exe, "--scene-check", e->path, data_dir ? "--data-dir" : NULL, data_dir, NULL };
         SDL_Process *child = SDL_CreateProcess(args, false);
-        int code = 1;
         if (!child || !SDL_WaitProcess(child, true, &code)) {
             fprintf(stderr, NW_APP_NAME ": %s: %s\n", e->path, SDL_GetError());
         }
         SDL_DestroyProcess(child);
+#endif
         failed += code != 0;
     }
     printf("scene-check: %u scenes, %u skipped, %u failed\n", scenes, skipped, failed);
@@ -1550,8 +1557,54 @@ static int nw_setup(const char *data_dir, int max_frames, NwPlatform *window)
     return 0;
 }
 
+#ifdef NW_UWP
+/* An Xbox app starts without a command line: args.txt in the data folder (one argument a line), when there is one,
+   stands in for it. It can be uploaded with the Device Portal; the tests use it. */
+static void nw_uwp_args(int *argc, char ***argv)
+{
+    char *pref = SDL_GetPrefPath(NULL, NW_PATHS_APP), *file = NULL;
+    size_t size = 0;
+    /* No console either: stdout and stderr (the checks' reports, the game's debug messages) go to stdout.txt. */
+    if (pref && SDL_asprintf(&file, "%sstdout.txt", pref) >= 0) {
+        if (freopen(file, "w", stdout)) {
+            setvbuf(stdout, NULL, _IONBF, 0);
+            _dup2(_fileno(stdout), _fileno(stderr));
+            setvbuf(stderr, NULL, _IONBF, 0);
+        }
+        SDL_free(file);
+        file = NULL;
+    }
+    char *text = pref && SDL_asprintf(&file, "%sargs.txt", pref) >= 0 ? (char *)SDL_LoadFile(file, &size) : NULL;
+    SDL_free(file);
+    SDL_free(pref);
+    if (!text) {
+        return;
+    }
+    char **args = (char **)SDL_calloc(size / 2 + 3, sizeof(*args));
+    if (!args) {
+        return;
+    }
+    int n = 0;
+    args[n++] = *argc > 0 ? (*argv)[0] : (char *)"NuWorld.exe";
+    char *save = NULL;
+    for (char *line = SDL_strtok_r(text, "\r\n", &save); line; line = SDL_strtok_r(NULL, "\r\n", &save)) {
+        if (SDL_strncmp(line, "env ", 4) == 0) {
+            _putenv(line + 4); /* "env NAME=VALUE": for Mesa and SDL, e.g. D3D12_DEBUG=warp on a PC without D3D12 */
+        } else if (line[0] && line[0] != '#') {
+            args[n++] = line;
+        }
+    }
+    args[n] = NULL;
+    *argc = n;
+    *argv = args;
+}
+#endif
+
 int main(int argc, char *argv[])
 {
+#ifdef NW_UWP
+    nw_uwp_args(&argc, &argv);
+#endif
     int max_frames = 0; /* 0 = run until the window is closed */
     const char *import = NULL, *import_save = NULL, *data_dir = NULL, *scene = NULL, *scene_check = NULL;
     const char *export_card = NULL, *export_slots = NULL; /* --export-save <card.ps2> <slots> */
