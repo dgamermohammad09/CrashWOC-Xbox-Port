@@ -86,6 +86,33 @@ static char *nw_data_root(const char *data_dir)
 }
 
 /* Headless disc import; returns the exit code. */
+/* Test hook: NW_WINDOW_SHOT=<png> saves the game window's frame once, NW_WINDOW_SHOT_MS (default 30000) after the
+   first call, on any renderer (the UWP build cannot be screenshotted from outside). */
+static void nw_window_shot(SDL_Window *window)
+{
+    static Uint64 first;
+    static bool done;
+    const char *path = SDL_getenv("NW_WINDOW_SHOT");
+    if (done || !path || !*path) {
+        return;
+    }
+    const char *ms = SDL_getenv("NW_WINDOW_SHOT_MS");
+    Uint64 now = SDL_GetTicks();
+    if (!first) {
+        first = now;
+    }
+    if (now - first < (Uint64)(ms ? SDL_atoi(ms) : 30000)) {
+        return;
+    }
+    done = true;
+    int w, h;
+    SDL_GetWindowSizeInPixels(window, &w, &h);
+    SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ABGR8888);
+    bool ok = s && nw_rhi_window_read(w, h, s->pixels, s->pitch) && SDL_SavePNG(s, path);
+    SDL_Log("window shot %s (%s, %dx%d): %s", path, nw_rhi_kind_name(nw_rhi_kind()), w, h, ok ? "saved" : SDL_GetError());
+    SDL_DestroySurface(s);
+}
+
 static int nw_import(const char *image, const char *data_dir)
 {
     NwDisc disc;
@@ -745,33 +772,6 @@ static void nw_window_close(NwPlatform *p)
 }
 
 /* The data folder's settings.toml read over s or written from it; a failure is reported and passed. */
-/* Test hook: NW_WINDOW_SHOT=<png> saves the game window's frame once, NW_WINDOW_SHOT_MS (default 30000) after the
-   first call, on any renderer (the UWP build cannot be screenshotted from outside). */
-static void nw_window_shot(SDL_Window *window)
-{
-    static Uint64 first;
-    static bool done;
-    const char *path = SDL_getenv("NW_WINDOW_SHOT");
-    if (done || !path || !*path) {
-        return;
-    }
-    const char *ms = SDL_getenv("NW_WINDOW_SHOT_MS");
-    Uint64 now = SDL_GetTicks();
-    if (!first) {
-        first = now;
-    }
-    if (now - first < (Uint64)(ms ? SDL_atoi(ms) : 30000)) {
-        return;
-    }
-    done = true;
-    int w, h;
-    SDL_GetWindowSizeInPixels(window, &w, &h);
-    SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ABGR8888);
-    bool ok = s && nw_rhi_window_read(w, h, s->pixels, s->pitch) && SDL_SavePNG(s, path);
-    SDL_Log("window shot %s (%s, %dx%d): %s", path, nw_rhi_kind_name(nw_rhi_kind()), w, h, ok ? "saved" : SDL_GetError());
-    SDL_DestroySurface(s);
-}
-
 static void nw_boot_settings(const char *data_dir, NwSettings *s, bool save)
 {
     char *root = nw_data_root(data_dir);
@@ -1604,6 +1604,7 @@ static int nw_setup(const char *data_dir, int max_frames, NwPlatform *window)
             result = nw_wizard_draw(wizard);
         }
         nw_ui_end();
+        nw_window_shot(platform.window);
         nw_rhi_present();
 
         if (max_frames > 0 && ++frames >= max_frames) {
