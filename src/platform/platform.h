@@ -1,4 +1,5 @@
-/* Window and OpenGL context (SDL3). Owned by the main/render thread. */
+/* Window and its renderer (SDL3, gfx/rhi.h: an OpenGL context or a Direct3D device). Owned by the main/render
+   thread. */
 #ifndef NUWORLD_PLATFORM_PLATFORM_H
 #define NUWORLD_PLATFORM_PLATFORM_H
 
@@ -8,7 +9,8 @@
 
 typedef struct NwPlatform {
     SDL_Window *window;
-    SDL_GLContext gl;
+    SDL_GLContext gl; /* the OpenGL renderer's context, NULL under the others */
+    bool rhi;         /* the renderer runs on the window */
 } NwPlatform;
 
 bool nw_platform_init(NwPlatform *p, const char *title, int width, int height);

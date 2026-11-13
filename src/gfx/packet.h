@@ -12,11 +12,14 @@
 #include "gfx/vu.h"
 
 struct numtl_s;
+typedef struct NwRhiBuffer NwRhiBuffer;
+typedef struct NwRhiVertexArray NwRhiVertexArray;
 
 /* A geom's mesh and a texture: made on the game thread, uploaded and freed on the render thread. */
 typedef struct NwGpuMesh {
     NwVifMesh mesh;
-    unsigned int vao, vbo, ibo;
+    NwRhiVertexArray *vao;
+    NwRhiBuffer *vbo, *ibo;
 } NwGpuMesh;
 
 typedef struct NwGpuTex {
@@ -26,13 +29,15 @@ typedef struct NwGpuTex {
 
 typedef struct NwGpuSprites {
     NwVifSprites sprites;
-    unsigned int vao, vbo, ibo;
+    NwRhiVertexArray *vao;
+    NwRhiBuffer *vbo, *ibo;
 } NwGpuSprites;
 
 typedef struct NwGpuSkin {
     NwVifSkin skin;
-    unsigned int vao, vbo, ibo;
-    unsigned int deltas, delta_tex; /* the blend-shape deltas as a texture buffer */
+    NwRhiVertexArray *vao;
+    NwRhiBuffer *vbo, *ibo;
+    NwRhiBuffer *deltas; /* the blend-shape deltas as a texel buffer */
 } NwGpuSkin;
 
 /* A texture in GS memory: the back or front buffer or a target's GS address (0: none), tw x th a power of two. */

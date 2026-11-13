@@ -10,24 +10,25 @@
 #include "data/image_tables.h"
 #include "frontend/debug.h"
 #include "gfx/gem.h"
-#include "gfx/gl.h"
 #include "gfx/interp.h"
+#include "gfx/rhi.h"
 #include "gfx/vu.h"
 #include "platform/paths.h"
 
 #define NW_BE_SURFS 16
 
 /* A GS surface (back or front buffer, render target) as a power-of-two texture at scale n, GS row y at rows from
-   n * (th - 1 - y). */
+   n * (th - 1 - y). Its draws go to tex under zatt (its own depth or the back buffer's), or with MSAA to ms_col under
+   ms_zatt, resolved into tex and zatt before a read. */
 typedef struct NwBeSurf {
     int32_t addr; /* NW_SURF_BACK, NW_SURF_FRONT, a GS address, 0 for the targets the port does not draw */
     int tw, th;   /* GS pixels */
     int n;        /* the internal scale it was made at */
-    GLuint tex, depth, fbo;
-    GLuint ms_fbo, ms_col, ms_depth; /* MSAA: where the draws go, resolved into tex and depth before a read */
-    int ms_w, ms_h, samples;         /* their storage */
-    bool ms;                         /* the draws go to ms_fbo */
-    bool dirty;                      /* ms_fbo holds draws tex and depth lack */
+    NwRhiTexture *tex, *depth, *zatt;
+    NwRhiTexture *ms_col, *ms_depth, *ms_zatt;
+    int ms_w, ms_h, samples; /* the MSAA buffers' storage */
+    bool ms;                 /* the draws go to ms_col */
+    bool dirty;              /* ms_col holds draws tex and zatt lack */
 } NwBeSurf;
 
 static struct {
@@ -35,7 +36,7 @@ static struct {
     uint32_t nsurf;
     NwBeSurf copy;         /* a target a draw also reads, copied */
     NwBeSurf zcopy;        /* the target's Z a depth CLUT reads, copied */
-    GLuint zclut;          /* a depth CLUT's entries */
+    NwRhiTexture *zclut;   /* a depth CLUT's entries */
     NwBeSurf *target;      /* what the draws go to */
     bool alpha;            /* the target keeps alpha (not PSMCT24) */
     int width, height;     /* the target's pixels */
@@ -44,12 +45,15 @@ static struct {
     float drawn_t;         /* at that blend */
     NwGpuJob *jobs;
     uint32_t jobcap;
-    GLuint rect_vao, rect_vbo, rect_ibo; /* the packet's sprites, four vertices each */
-    GLuint ot_ibo;                       /* the packet's OT triangles */
-    GLuint pool, pool_tex;               /* the packet's joint palettes, a texture buffer on unit 3 */
-    GLuint weights, weights_tex;         /* its blend-shape weights, on unit 4 */
-    GLuint verts_vao, verts_vbo;         /* its VERTS triangles */
-    GLuint ptl_vao, ptl_vbo;             /* its particles */
+    NwRhiVertexArray *rect_vao;           /* the packet's sprites, four vertices each */
+    NwRhiBuffer *rect_vbo, *rect_ibo;
+    NwRhiBuffer *ot_ibo;                  /* the packet's OT triangles */
+    NwRhiBuffer *pool;                    /* the packet's joint palettes, a texel buffer on unit 3 */
+    NwRhiBuffer *weights;                 /* its blend-shape weights, on unit 4 */
+    NwRhiVertexArray *verts_vao;          /* its VERTS triangles */
+    NwRhiBuffer *verts_vbo;
+    NwRhiVertexArray *ptl_vao;            /* its particles */
+    NwRhiBuffer *ptl_vbo;
     NwVifVertex *rect_verts;
     uint32_t rect_cap;
     bool wireframe;
@@ -62,9 +66,10 @@ static struct {
     bool flushing; /* drawing those */
     int scale;          /* the frame's */
     int samples;        /* the frame's MSAA, 0 off */
-    GLint max_tex;      /* GL_MAX_TEXTURE_SIZE */
-    GLint max_samples;  /* GL_MAX_SAMPLES */
-    GLuint present_fbo; /* a mip level of the back buffer, to shrink it from */
+    int max_tex;        /* the GPU's largest texture */
+    int max_samples;    /* its most MSAA samples */
+    double clear_z;     /* the depth and stencil a new surface clears to: the last NW_CMD_CLEAR's and volumes' */
+    uint8_t clear_s;
 } nw_be;
 
 /* A command with no material: GS defaults, untextured. */
@@ -72,25 +77,37 @@ static const NwVuMaterial nw_be_default = { { 0 }, { 0 }, { 0 }, NULL, { .ztst =
 
 static void nw_be_resolve(NwBeSurf *s);
 
+static NwBeSurf *nw_be_back(void)
+{
+    for (uint32_t i = 0; i < nw_be.nsurf; i++) {
+        if (nw_be.surf[i].addr == NW_SURF_BACK) {
+            return &nw_be.surf[i];
+        }
+    }
+    return NULL;
+}
+
 bool nw_backend_save(const char *path)
 {
-    NwBeSurf *back = NULL;
-    for (uint32_t i = 0; i < nw_be.nsurf && !back; i++) {
-        back = nw_be.surf[i].addr == NW_SURF_BACK ? &nw_be.surf[i] : NULL;
-    }
+    NwBeSurf *back = nw_be_back();
     SDL_Surface *shot = NULL;
+    uint8_t *rows = NULL;
+    bool read = false;
     if (!back) {
         SDL_SetError("nothing drawn yet");
-    } else if ((shot = SDL_CreateSurface(nw_be.shown_w * back->n, nw_be.shown_h * back->n, SDL_PIXELFORMAT_RGBX32))) {
+    } else if ((shot = SDL_CreateSurface(nw_be.shown_w * back->n, nw_be.shown_h * back->n, SDL_PIXELFORMAT_RGBX32)) &&
+               (rows = SDL_malloc((size_t)shot->w * 4 * (size_t)shot->h))) {
+        /* The shown rows are the texture's top ones, the picture's top row last. */
         nw_be_resolve(back);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, back->fbo);
-        for (int y = 0; y < shot->h; y++) {
-            glReadPixels(0, back->th * back->n - 1 - y, shot->w, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                         (uint8_t *)shot->pixels + (size_t)y * (size_t)shot->pitch);
+        int y0 = back->th * back->n - shot->h;
+        read = nw_rhi_texture_read(back->tex, 0, y0, shot->w, shot->h, rows, shot->w * 4);
+        for (int y = 0; read && y < shot->h; y++) {
+            memcpy((uint8_t *)shot->pixels + (size_t)y * (size_t)shot->pitch,
+                   rows + (size_t)(shot->h - 1 - y) * (size_t)shot->w * 4, (size_t)shot->w * 4);
         }
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
-    bool ok = shot && SDL_SavePNG(shot, path);
+    bool ok = shot && read && SDL_SavePNG(shot, path);
+    SDL_free(rows);
     SDL_DestroySurface(shot);
     return ok;
 }
@@ -110,8 +127,9 @@ static void nw_be_screenshot(void *user)
 bool nw_backend_init(void)
 {
     nw_be.opts.scale = 1;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &nw_be.max_tex);
-    glGetIntegerv(GL_MAX_SAMPLES, &nw_be.max_samples);
+    nw_be.clear_z = 1.0;
+    nw_be.max_tex = nw_rhi_caps()->max_texture;
+    nw_be.max_samples = nw_rhi_caps()->max_samples;
     return nw_vu_init();
 }
 
@@ -121,74 +139,105 @@ void nw_backend_debug_menu(void)
     nw_debug_action("Debug", "Screenshot", SDL_SCANCODE_F12, nw_be_screenshot, NULL);
 }
 
+/* GL re-specifies a texture in place and every framebuffer it is attached to keeps it: the surfaces that drew under
+   was draw under now. */
+static void nw_be_rename(const NwRhiTexture *was, NwRhiTexture *now)
+{
+    NwBeSurf *all[NW_BE_SURFS + 2];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < nw_be.nsurf; i++) {
+        all[n++] = &nw_be.surf[i];
+    }
+    all[n++] = &nw_be.copy;
+    all[n++] = &nw_be.zcopy;
+    for (uint32_t i = 0; was && i < n; i++) {
+        if (all[i]->zatt == was) {
+            all[i]->zatt = now;
+        }
+        if (all[i]->ms_zatt == was) {
+            all[i]->ms_zatt = now;
+        }
+    }
+}
+
 static void nw_be_ms_free(NwBeSurf *s)
 {
-    glDeleteFramebuffers(1, &s->ms_fbo);
-    glDeleteRenderbuffers(1, &s->ms_col);
-    glDeleteRenderbuffers(1, &s->ms_depth);
-    s->ms_fbo = s->ms_col = s->ms_depth = 0;
+    nw_be_rename(s->ms_depth, NULL);
+    nw_rhi_texture_destroy(s->ms_col);
+    nw_rhi_texture_destroy(s->ms_depth);
+    s->ms_col = s->ms_depth = s->ms_zatt = NULL;
     s->ms_w = s->ms_h = s->samples = 0;
 }
 
 static void nw_be_surf_free(NwBeSurf *s)
 {
-    glDeleteFramebuffers(1, &s->fbo);
-    glDeleteTextures(1, &s->tex);
-    glDeleteTextures(1, &s->depth);
+    nw_be_rename(s->depth, NULL);
+    nw_rhi_texture_destroy(s->tex);
+    nw_rhi_texture_destroy(s->depth);
     nw_be_ms_free(s);
     memset(s, 0, sizeof(*s));
 }
 
-static GLuint nw_be_fbo(const NwBeSurf *s)
+/* What s's draws go to. */
+static void nw_be_set(const NwBeSurf *s)
 {
-    return s->ms ? s->ms_fbo : s->fbo;
+    if (s->ms) {
+        nw_rhi_set_target(s->ms_col, s->ms_zatt);
+    } else {
+        nw_rhi_set_target(s->tex, s->zatt);
+    }
 }
 
-/* Same-size blit, as a resolving blit needs; rebinds the target's framebuffer after. */
+/* The draws go back to the target after a surface was set for a clear. */
+static void nw_be_rebind(void)
+{
+    if (nw_be.target) {
+        nw_be_set(nw_be.target);
+    }
+}
+
+/* Same-size blit, as a resolving blit needs; the target stays set. */
 static void nw_be_resolve(NwBeSurf *s)
 {
     if (!s->dirty) {
         return;
     }
     int w = s->tw * s->n, h = s->th * s->n;
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, s->ms_fbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s->fbo);
-    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
-                      GL_NEAREST);
+    nw_rhi_blit(&(NwRhiBlit){ .src_colour = s->ms_col, .src_depth = s->ms_zatt, .dst_colour = s->tex,
+                              .dst_depth = s->zatt, .src = { 0, 0, w, h }, .dst = { 0, 0, w, h }, .colour = true,
+                              .depth = true, .stencil = true });
     s->dirty = false;
-    glBindFramebuffer(GL_FRAMEBUFFER, nw_be.target ? nw_be_fbo(nw_be.target) : 0);
 }
 
-/* s's multisampled buffers, black, under its own Z or shared's (the back buffer's); leaves them bound. */
+/* Black everywhere, as a new GL buffer is cleared: colour, depth and stencil to the values GL last cleared to. */
+static void nw_be_clear_new(void)
+{
+    nw_rhi_clear(&(NwRhiClear){ .colour = true, .depth = true, .stencil = true, .rgba = { 0.0f, 0.0f, 0.0f, 1.0f },
+                                .z = nw_be.clear_z, .s = nw_be.clear_s, .mask = { true, true, true, true },
+                                .depth_write = true, .stencil_write = 0xFF });
+}
+
+/* s's multisampled buffers, black, under its own Z or shared's (the back buffer's); leaves them set. */
 static void nw_be_ms(NwBeSurf *s, const NwBeSurf *shared)
 {
     int w = s->tw * s->n, h = s->th * s->n;
-    if (!s->ms_fbo) {
-        glGenFramebuffers(1, &s->ms_fbo);
-        glGenRenderbuffers(1, &s->ms_col);
-        glGenRenderbuffers(1, &s->ms_depth);
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, s->ms_fbo);
-    if (s->ms_w != w || s->ms_h != h || s->samples != nw_be.samples) {
-        glBindRenderbuffer(GL_RENDERBUFFER, s->ms_col);
-        glRenderbufferStorageMultisample(GL_RENDERBUFFER, nw_be.samples, GL_RGBA8, w, h);
-        glBindRenderbuffer(GL_RENDERBUFFER, s->ms_depth);
-        glRenderbufferStorageMultisample(GL_RENDERBUFFER, nw_be.samples, GL_DEPTH24_STENCIL8, w, h);
-        glBindRenderbuffer(GL_RENDERBUFFER, 0);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, s->ms_col);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s->ms_depth);
+    if (!s->ms_col || s->ms_w != w || s->ms_h != h || s->samples != nw_be.samples) {
+        NwRhiTexture *col = nw_rhi_texture_create(NW_RHI_RGBA8, w, h, 1, nw_be.samples, NW_RHI_TEX_TARGET, NULL);
+        NwRhiTexture *depth = nw_rhi_texture_create(NW_RHI_D24S8, w, h, 1, nw_be.samples, NW_RHI_TEX_TARGET, NULL);
+        nw_be_rename(s->ms_depth, depth);
+        nw_rhi_texture_destroy(s->ms_col);
+        nw_rhi_texture_destroy(s->ms_depth);
+        s->ms_col = col;
+        s->ms_depth = s->ms_zatt = depth;
         s->ms_w = w;
         s->ms_h = h;
         s->samples = nw_be.samples;
         s->dirty = false;
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthMask(GL_TRUE);
-        glStencilMask(0xFF);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        nw_rhi_set_target(s->ms_col, s->ms_depth);
+        nw_be_clear_new();
     }
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
-                              shared ? shared->ms_depth : s->ms_depth);
+    s->ms_zatt = shared ? shared->ms_depth : s->ms_depth;
+    nw_rhi_set_target(s->ms_col, s->ms_zatt);
 }
 
 void nw_backend_shutdown(void)
@@ -198,24 +247,34 @@ void nw_backend_shutdown(void)
     }
     nw_be_surf_free(&nw_be.copy);
     nw_be_surf_free(&nw_be.zcopy);
-    glDeleteTextures(1, &nw_be.zclut);
-    glDeleteVertexArrays(1, &nw_be.rect_vao);
-    glDeleteBuffers(1, &nw_be.rect_vbo);
-    glDeleteBuffers(1, &nw_be.rect_ibo);
-    glDeleteBuffers(1, &nw_be.ot_ibo);
-    glDeleteBuffers(1, &nw_be.pool);
-    glDeleteTextures(1, &nw_be.pool_tex);
-    glDeleteBuffers(1, &nw_be.weights);
-    glDeleteTextures(1, &nw_be.weights_tex);
-    glDeleteVertexArrays(1, &nw_be.verts_vao);
-    glDeleteBuffers(1, &nw_be.verts_vbo);
-    glDeleteVertexArrays(1, &nw_be.ptl_vao);
-    glDeleteBuffers(1, &nw_be.ptl_vbo);
-    glDeleteFramebuffers(1, &nw_be.present_fbo);
+    nw_rhi_texture_destroy(nw_be.zclut);
+    nw_rhi_vertex_array_destroy(nw_be.rect_vao);
+    nw_rhi_buffer_destroy(nw_be.rect_vbo);
+    nw_rhi_buffer_destroy(nw_be.rect_ibo);
+    nw_rhi_buffer_destroy(nw_be.ot_ibo);
+    nw_rhi_buffer_destroy(nw_be.pool);
+    nw_rhi_buffer_destroy(nw_be.weights);
+    nw_rhi_vertex_array_destroy(nw_be.verts_vao);
+    nw_rhi_buffer_destroy(nw_be.verts_vbo);
+    nw_rhi_vertex_array_destroy(nw_be.ptl_vao);
+    nw_rhi_buffer_destroy(nw_be.ptl_vbo);
     nw_vu_shutdown();
     SDL_free(nw_be.jobs);
     SDL_free(nw_be.rect_verts);
     memset(&nw_be, 0, sizeof(nw_be));
+}
+
+/* A vertex array of a static vertex buffer and index buffer. */
+static NwRhiVertexArray *nw_be_static(const NwRhiVertexLayout *layout, const void *verts, size_t vsize,
+                                      const void *idx, size_t isize, NwRhiBuffer **vbo, NwRhiBuffer **ibo)
+{
+    *vbo = nw_rhi_buffer_create(NW_RHI_VERTICES, NW_RHI_RGBA8);
+    *ibo = nw_rhi_buffer_create(NW_RHI_INDICES, NW_RHI_RGBA8);
+    NwRhiVertexArray *va = nw_rhi_vertex_array_create();
+    nw_rhi_buffer_data(*vbo, vsize, verts, false);
+    nw_rhi_buffer_data(*ibo, isize, idx, false);
+    nw_rhi_vertex_array_set(va, layout, *vbo, 0, *ibo);
+    return va;
 }
 
 /* Each sprite as a quad of two triangles, s and t from (0, 0) to (1, 1), its size in tex.zw. */
@@ -244,39 +303,19 @@ static void nw_be_sprites_upload(NwGpuSprites *s)
             idx[i * 6 + k] = i * 4 + quad[k];
         }
     }
-    glGenVertexArrays(1, &s->vao);
-    glBindVertexArray(s->vao);
-    glGenBuffers(1, &s->vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)n * 4 * (GLsizeiptr)sizeof(*v), v, GL_STATIC_DRAW);
-    glGenBuffers(1, &s->ibo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)n * 6 * (GLsizeiptr)sizeof(*idx), idx, GL_STATIC_DRAW);
-    nw_vu_sprite_attribs();
+    s->vao = nw_be_static(nw_vu_sprite_layout(), v, (size_t)n * 4 * sizeof(*v), idx, (size_t)n * 6 * sizeof(*idx),
+                          &s->vbo, &s->ibo);
     SDL_free(v);
     SDL_free(idx);
 }
 
 static void nw_be_skin_upload(NwGpuSkin *s)
 {
-    glGenVertexArrays(1, &s->vao);
-    glBindVertexArray(s->vao);
-    glGenBuffers(1, &s->vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)s->skin.nverts * (GLsizeiptr)sizeof(NwVifSkinVertex), s->skin.verts,
-                 GL_STATIC_DRAW);
-    glGenBuffers(1, &s->ibo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)s->skin.ntris * 12, s->skin.tris, GL_STATIC_DRAW);
-    nw_vu_skin_attribs();
+    s->vao = nw_be_static(nw_vu_skin_layout(), s->skin.verts, (size_t)s->skin.nverts * sizeof(NwVifSkinVertex),
+                          s->skin.tris, (size_t)s->skin.ntris * 12, &s->vbo, &s->ibo);
     if (s->skin.ndeltas) {
-        glGenBuffers(1, &s->deltas);
-        glBindBuffer(GL_TEXTURE_BUFFER, s->deltas);
-        glBufferData(GL_TEXTURE_BUFFER, (GLsizeiptr)s->skin.ndeltas * (GLsizeiptr)sizeof(*s->skin.deltas),
-                     s->skin.deltas, GL_STATIC_DRAW);
-        glGenTextures(1, &s->delta_tex);
-        glBindTexture(GL_TEXTURE_BUFFER, s->delta_tex);
-        glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, s->deltas);
+        s->deltas = nw_rhi_buffer_create(NW_RHI_TEXELS, NW_RHI_RGBA32F);
+        nw_rhi_buffer_data(s->deltas, (size_t)s->skin.ndeltas * sizeof(*s->skin.deltas), s->skin.deltas, false);
     }
 }
 
@@ -285,26 +324,19 @@ static void nw_be_job(const NwGpuJob *job)
     NwGpuMesh *m = job->obj;
     NwGpuTex *t = job->obj;
     NwGpuSkin *sk = job->obj;
+    NwGpuSprites *sp = job->obj;
     switch (job->op) {
     case NW_GPU_UPLOAD_MESH:
-        glGenVertexArrays(1, &m->vao);
-        glBindVertexArray(m->vao);
-        glGenBuffers(1, &m->vbo);
-        glBindBuffer(GL_ARRAY_BUFFER, m->vbo);
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)m->mesh.nverts * (GLsizeiptr)sizeof(NwVifVertex), m->mesh.verts,
-                     GL_STATIC_DRAW);
-        glGenBuffers(1, &m->ibo);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m->ibo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)m->mesh.ntris * 12, m->mesh.tris, GL_STATIC_DRAW);
-        nw_vu_attribs();
+        m->vao = nw_be_static(nw_vu_layout(), m->mesh.verts, (size_t)m->mesh.nverts * sizeof(NwVifVertex),
+                              m->mesh.tris, (size_t)m->mesh.ntris * 12, &m->vbo, &m->ibo);
         break;
     case NW_GPU_UPLOAD_TEX:
         nw_vu_texture(&t->gl, &t->tex);
         break;
     case NW_GPU_FREE_MESH:
-        glDeleteVertexArrays(1, &m->vao);
-        glDeleteBuffers(1, &m->vbo);
-        glDeleteBuffers(1, &m->ibo);
+        nw_rhi_vertex_array_destroy(m->vao);
+        nw_rhi_buffer_destroy(m->vbo);
+        nw_rhi_buffer_destroy(m->ibo);
         nw_vif_free(&m->mesh);
         SDL_free(m);
         break;
@@ -314,24 +346,23 @@ static void nw_be_job(const NwGpuJob *job)
         SDL_free(t);
         break;
     case NW_GPU_UPLOAD_SPRITES:
-        nw_be_sprites_upload(job->obj);
+        nw_be_sprites_upload(sp);
         break;
     case NW_GPU_FREE_SPRITES:
-        glDeleteVertexArrays(1, &((NwGpuSprites *)job->obj)->vao);
-        glDeleteBuffers(1, &((NwGpuSprites *)job->obj)->vbo);
-        glDeleteBuffers(1, &((NwGpuSprites *)job->obj)->ibo);
-        nw_vif_sprites_free(&((NwGpuSprites *)job->obj)->sprites);
-        SDL_free(job->obj);
+        nw_rhi_vertex_array_destroy(sp->vao);
+        nw_rhi_buffer_destroy(sp->vbo);
+        nw_rhi_buffer_destroy(sp->ibo);
+        nw_vif_sprites_free(&sp->sprites);
+        SDL_free(sp);
         break;
     case NW_GPU_UPLOAD_SKIN:
         nw_be_skin_upload(sk);
         break;
     case NW_GPU_FREE_SKIN:
-        glDeleteVertexArrays(1, &sk->vao);
-        glDeleteBuffers(1, &sk->vbo);
-        glDeleteBuffers(1, &sk->ibo);
-        glDeleteBuffers(1, &sk->deltas);
-        glDeleteTextures(1, &sk->delta_tex);
+        nw_rhi_vertex_array_destroy(sk->vao);
+        nw_rhi_buffer_destroy(sk->vbo);
+        nw_rhi_buffer_destroy(sk->ibo);
+        nw_rhi_buffer_destroy(sk->deltas);
         nw_vif_skin_free(&sk->skin);
         SDL_free(sk);
         break;
@@ -342,50 +373,42 @@ static void nw_be_job(const NwGpuJob *job)
 }
 
 /* A black surface with a 24-bit Z like the GS's, as a texture a depth CLUT can read (plus stencil); a rescale keeps
-   the picture. Leaves its framebuffer bound. */
+   the picture. Leaves it set. */
 static void nw_be_surf_make(NwBeSurf *s, int32_t addr, int tw, int th)
 {
     int n = nw_be.scale;
-    if (s->tw != tw || s->th != th || s->n != n) {
+    bool remake = s->tw != tw || s->th != th || s->n != n;
+    if (remake) {
         nw_be_resolve(s);
     }
     NwBeSurf old = *s;
-    bool rescale = s->fbo && s->tw == tw && s->th == th && s->n != n;
-    old.ms_fbo = old.ms_col = old.ms_depth = 0; /* s keeps them, remade at its size when drawn */
-    if (!s->fbo || rescale) {
-        glGenFramebuffers(1, &s->fbo);
-        glGenTextures(1, &s->tex);
-        glGenTextures(1, &s->depth);
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
-    if (s->tw != tw || s->th != th || s->n != n) {
-        glActiveTexture(GL_TEXTURE0 + 2);
-        glBindTexture(GL_TEXTURE_2D, s->tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tw * n, th * n, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glBindTexture(GL_TEXTURE_2D, s->depth);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, tw * n, th * n, 0, GL_DEPTH_STENCIL,
-                     GL_UNSIGNED_INT_24_8, NULL);
-        glActiveTexture(GL_TEXTURE0);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s->tex, 0);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s->depth, 0);
+    bool rescale = s->tex && s->tw == tw && s->th == th && s->n != n;
+    if (remake) {
+        NwRhiTexture *tex =
+            nw_rhi_texture_create(NW_RHI_RGBA8, tw * n, th * n, 1, 1, NW_RHI_TEX_TARGET | NW_RHI_TEX_MIPGEN, NULL);
+        NwRhiTexture *depth = nw_rhi_texture_create(NW_RHI_D24S8, tw * n, th * n, 1, 1, NW_RHI_TEX_TARGET, NULL);
+        nw_be_rename(s->depth, depth);
+        if (!rescale) {
+            nw_rhi_texture_destroy(s->tex);
+            nw_rhi_texture_destroy(s->depth);
+        }
+        s->tex = tex;
+        s->depth = s->zatt = depth;
         s->tw = tw;
         s->th = th;
         s->n = n;
         s->dirty = false;
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthMask(GL_TRUE);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        nw_rhi_set_target(s->tex, s->zatt);
+        nw_be_clear_new();
         if (rescale) {
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, old.fbo);
-            glBlitFramebuffer(0, 0, tw * old.n, th * old.n, 0, 0, tw * n, th * n, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-            nw_be_surf_free(&old);
-            glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+            nw_rhi_blit(&(NwRhiBlit){ .src_colour = old.tex, .dst_colour = s->tex,
+                                      .src = { 0, 0, tw * old.n, th * old.n }, .dst = { 0, 0, tw * n, th * n },
+                                      .colour = true, .linear = true });
+            nw_rhi_texture_destroy(old.tex);
+            nw_rhi_texture_destroy(old.depth);
         }
+    } else {
+        nw_rhi_set_target(s->tex, s->zatt);
     }
     s->addr = addr;
 }
@@ -409,9 +432,9 @@ static NwBeSurf *nw_be_surf(int32_t addr, int tw, int th)
 /* The draws go to s, width x height GS pixels at its top left. */
 static void nw_be_bind(NwBeSurf *s, int width, int height)
 {
-    glBindFramebuffer(GL_FRAMEBUFFER, nw_be_fbo(s));
+    nw_be_set(s);
     s->dirty |= s->ms;
-    glViewport(0, (s->th - height) * s->n, width * s->n, height * s->n);
+    nw_rhi_viewport(0, (s->th - height) * s->n, width * s->n, height * s->n);
     nw_be.target = s;
     nw_be.width = width;
     nw_be.height = height;
@@ -430,10 +453,7 @@ static void nw_be_target(const NwCmd *c)
         surf.tw = (uint16_t)c->target.width;
         surf.th = (uint16_t)c->target.height;
     }
-    NwBeSurf *back = NULL;
-    for (uint32_t i = 0; i < nw_be.nsurf && !back; i++) {
-        back = nw_be.surf[i].addr == NW_SURF_BACK ? &nw_be.surf[i] : NULL;
-    }
+    NwBeSurf *back = nw_be_back();
     NwBeSurf *s = nw_be_surf(surf.addr, surf.tw, surf.th);
     if (s) {
         bool shared =
@@ -447,9 +467,8 @@ static void nw_be_target(const NwCmd *c)
             if (shared) {
                 nw_be_resolve(back);
             }
-            glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D,
-                                   shared ? back->depth : s->depth, 0);
+            s->zatt = shared ? back->depth : s->depth;
+            nw_rhi_set_target(s->tex, s->zatt);
         } else {
             nw_be_ms(s, back);
         }
@@ -460,25 +479,31 @@ static void nw_be_target(const NwCmd *c)
     }
 }
 
+/* The target's colour copied into nw_be.copy, as a texture cannot be both. */
+static void nw_be_copy_target(NwBeSurf *s)
+{
+    nw_be_surf_make(&nw_be.copy, 0, s->tw, s->th);
+    int w = s->tw * s->n, h = s->th * s->n;
+    nw_rhi_blit(&(NwRhiBlit){ .src_colour = s->ms ? s->ms_col : s->tex, .dst_colour = nw_be.copy.tex,
+                              .src = { 0, 0, w, h }, .dst = { 0, 0, w, h }, .colour = true });
+    nw_be_rebind();
+    nw_be.copy_of = s;
+    nw_be.copy_run = nw_be.runs;
+}
+
 /* A surface for a draw to read: the target itself is read from a copy, as a texture cannot be both. */
 static const NwVuTexture *nw_be_surf_tex(const NwSurf *surf, bool tcc)
 {
     static NwVuTexture tex;
     NwBeSurf *s = NULL;
     for (uint32_t i = 0; i < nw_be.nsurf && !s; i++) {
-        s = nw_be.surf[i].addr == surf->addr && nw_be.surf[i].fbo ? &nw_be.surf[i] : NULL;
+        s = nw_be.surf[i].addr == surf->addr && nw_be.surf[i].tex ? &nw_be.surf[i] : NULL;
     }
     if (!s) {
         return NULL;
     }
     if (s == nw_be.target) {
-        nw_be_surf_make(&nw_be.copy, 0, s->tw, s->th);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, nw_be_fbo(s));
-        glBlitFramebuffer(0, 0, s->tw * s->n, s->th * s->n, 0, 0, s->tw * s->n, s->th * s->n, GL_COLOR_BUFFER_BIT,
-                          GL_NEAREST);
-        glBindFramebuffer(GL_FRAMEBUFFER, nw_be_fbo(s));
-        nw_be.copy_of = s;
-        nw_be.copy_run = nw_be.runs;
+        nw_be_copy_target(s);
         s = &nw_be.copy;
     } else {
         nw_be_resolve(s);
@@ -491,14 +516,7 @@ static const NwVuTexture *nw_be_surf_tex(const NwSurf *surf, bool tcc)
 static const NwVuTexture *nw_be_dst(void)
 {
     static NwVuTexture tex;
-    NwBeSurf *s = nw_be.target;
-    nw_be_surf_make(&nw_be.copy, 0, s->tw, s->th);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, nw_be_fbo(s));
-    glBlitFramebuffer(0, 0, s->tw * s->n, s->th * s->n, 0, 0, s->tw * s->n, s->th * s->n, GL_COLOR_BUFFER_BIT,
-                      GL_NEAREST);
-    glBindFramebuffer(GL_FRAMEBUFFER, nw_be_fbo(s));
-    nw_be.copy_of = s;
-    nw_be.copy_run = nw_be.runs;
+    nw_be_copy_target(nw_be.target);
     tex = (NwVuTexture){ .index = nw_be.copy.tex, .tcc = true, .surface = true };
     return &tex;
 }
@@ -509,22 +527,15 @@ static const NwVuZClut *nw_be_zclut(const NwZClut *z)
     static NwVuZClut vz;
     NwBeSurf *s = nw_be.target;
     nw_be_surf_make(&nw_be.zcopy, 0, s->tw, s->th);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, nw_be_fbo(s));
-    glBlitFramebuffer(0, 0, s->tw * s->n, s->th * s->n, 0, 0, s->tw * s->n, s->th * s->n, GL_DEPTH_BUFFER_BIT,
-                      GL_NEAREST);
-    glBindFramebuffer(GL_FRAMEBUFFER, nw_be_fbo(s));
-    glActiveTexture(GL_TEXTURE0 + 7);
+    int w = s->tw * s->n, h = s->th * s->n;
+    nw_rhi_blit(&(NwRhiBlit){ .src_colour = s->ms ? s->ms_col : s->tex, .src_depth = s->ms ? s->ms_zatt : s->zatt,
+                              .dst_colour = nw_be.zcopy.tex, .dst_depth = nw_be.zcopy.zatt, .src = { 0, 0, w, h },
+                              .dst = { 0, 0, w, h }, .depth = true });
+    nw_be_rebind();
     if (!nw_be.zclut) {
-        glGenTextures(1, &nw_be.zclut);
-        glBindTexture(GL_TEXTURE_2D, nw_be.zclut);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8UI, 256, 1, 0, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, NULL);
+        nw_be.zclut = nw_rhi_texture_create(NW_RHI_RGBA8UI, 256, 1, 1, 1, 0, NULL);
     }
-    glBindTexture(GL_TEXTURE_2D, nw_be.zclut);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, z->clut);
-    glActiveTexture(GL_TEXTURE0);
+    nw_rhi_texture_update(nw_be.zclut, 0, 0, 0, 256, 1, z->clut);
     vz = (NwVuZClut){ nw_be.zcopy.depth, nw_be.zclut, z->shift, z->base, z->far, z->near,
                       { z->spot ? 2u : z->clear ? 1u : 0u, z->clear_z[0], z->clear_z[1] }, z->alpha, z->ad };
     return &vz;
@@ -570,14 +581,15 @@ static NwVuMaterial nw_be_material(const NwPacket *p, const NwCmd *c, bool uvrow
     return m;
 }
 
-static void nw_be_passes(NwVuProgram program, const NwVuObject *o, const NwVuMaterial *m, GLsizei count,
-                         const void *first)
+/* The program's passes over count indices from first, of va's index buffer or of indices. */
+static void nw_be_passes(NwVuProgram program, const NwVuObject *o, const NwVuMaterial *m, NwRhiVertexArray *va,
+                         NwRhiBuffer *indices, uint32_t first, uint32_t count)
 {
     NwMtlPass pass[2];
     uint32_t n = nw_vu_use(program, o, m, pass);
     for (uint32_t k = 0; k < n; k++) {
         nw_vu_pass(program, m, &pass[k]);
-        glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, first);
+        nw_rhi_draw_indexed(va, indices, first, count);
     }
 }
 
@@ -586,16 +598,15 @@ static void nw_be_clear(const NwPacket *p, const NwCmd *c)
 {
     const int32_t *sc = p->views[c->view].scissor;
     int n = nw_be.target->n;
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(sc[0] * n, (nw_be.target->th - 1 - sc[3]) * n, (sc[2] - sc[0] + 1) * n, (sc[3] - sc[1] + 1) * n);
+    const int scissor[4] = { sc[0] * n, (nw_be.target->th - 1 - sc[3]) * n, (sc[2] - sc[0] + 1) * n,
+                             (sc[3] - sc[1] + 1) * n };
     bool rgb = c->clear.mask & 1, z = c->clear.mask & 2;
-    glColorMask(rgb, rgb, rgb, rgb && nw_be.alpha);
-    glDepthMask(z);
-    glClearColor(c->clear.rgba[0] / 255.0f, c->clear.rgba[1] / 255.0f, c->clear.rgba[2] / 255.0f,
-                 SDL_min(c->clear.rgba[3] / 128.0f, 1.0f));
-    glClearDepth(1.0 - c->clear.z / 8388607.0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_SCISSOR_TEST);
+    nw_be.clear_z = 1.0 - c->clear.z / 8388607.0;
+    nw_rhi_clear(&(NwRhiClear){ .colour = true, .depth = true,
+                                .rgba = { c->clear.rgba[0] / 255.0f, c->clear.rgba[1] / 255.0f,
+                                          c->clear.rgba[2] / 255.0f, SDL_min(c->clear.rgba[3] / 128.0f, 1.0f) },
+                                .z = nw_be.clear_z, .mask = { rgb, rgb, rgb, rgb && nw_be.alpha }, .depth_write = z,
+                                .scissor = scissor });
 }
 
 /* Uploads the packet's sprites as quads: GS coordinates for the unlit program, s and t x4096. */
@@ -622,13 +633,11 @@ static void nw_be_rects(const NwPacket *p)
             }
         }
         if (!nw_be.rect_vao) {
-            glGenVertexArrays(1, &nw_be.rect_vao);
-            glGenBuffers(1, &nw_be.rect_vbo);
-            glGenBuffers(1, &nw_be.rect_ibo);
+            nw_be.rect_vao = nw_rhi_vertex_array_create();
+            nw_be.rect_vbo = nw_rhi_buffer_create(NW_RHI_VERTICES, NW_RHI_RGBA8);
+            nw_be.rect_ibo = nw_rhi_buffer_create(NW_RHI_INDICES, NW_RHI_RGBA8);
         }
-        glBindVertexArray(nw_be.rect_vao);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, nw_be.rect_ibo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)n * 6 * (GLsizeiptr)sizeof(*idx), idx, GL_STATIC_DRAW);
+        nw_rhi_buffer_data(nw_be.rect_ibo, (size_t)n * 6 * sizeof(*idx), idx, false);
         SDL_free(idx);
         nw_be.rect_verts = verts;
         nw_be.rect_cap = n;
@@ -648,11 +657,8 @@ static void nw_be_rects(const NwPacket *p)
             memcpy(v->col, c->rect.rgba, 4);
         }
     }
-    glBindVertexArray(nw_be.rect_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, nw_be.rect_vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(v - nw_be.rect_verts) * (GLsizeiptr)sizeof(*v), nw_be.rect_verts,
-                 GL_STREAM_DRAW);
-    nw_vu_attribs();
+    nw_rhi_buffer_data(nw_be.rect_vbo, (size_t)(v - nw_be.rect_verts) * sizeof(*v), nw_be.rect_verts, true);
+    nw_rhi_vertex_array_set(nw_be.rect_vao, nw_vu_layout(), nw_be.rect_vbo, 0, nw_be.rect_ibo);
 }
 
 static void nw_be_rect(const NwPacket *p, const NwCmd *c, uint32_t index)
@@ -663,8 +669,7 @@ static void nw_be_rect(const NwPacket *p, const NwCmd *c, uint32_t index)
     memset(&o, 0, sizeof(o));
     memcpy(o.lv, g, sizeof(o.lv));
     NwVuMaterial m = nw_be_material(p, c, false);
-    glBindVertexArray(nw_be.rect_vao);
-    nw_be_passes(NW_VU_TRICU, &o, &m, 6, (const void *)(uintptr_t)(index * 6 * sizeof(uint32_t)));
+    nw_be_passes(NW_VU_TRICU, &o, &m, nw_be.rect_vao, NULL, index * 6, 6);
 }
 
 static void nw_be_verts(const NwPacket *p)
@@ -673,13 +678,11 @@ static void nw_be_verts(const NwPacket *p)
         return;
     }
     if (!nw_be.verts_vao) {
-        glGenVertexArrays(1, &nw_be.verts_vao);
-        glGenBuffers(1, &nw_be.verts_vbo);
+        nw_be.verts_vao = nw_rhi_vertex_array_create();
+        nw_be.verts_vbo = nw_rhi_buffer_create(NW_RHI_VERTICES, NW_RHI_RGBA8);
     }
-    glBindVertexArray(nw_be.verts_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, nw_be.verts_vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)p->nverts * (GLsizeiptr)sizeof(*p->verts), p->verts, GL_STREAM_DRAW);
-    nw_vu_sprite_attribs();
+    nw_rhi_buffer_data(nw_be.verts_vbo, (size_t)p->nverts * sizeof(*p->verts), p->verts, true);
+    nw_rhi_vertex_array_set(nw_be.verts_vao, nw_vu_sprite_layout(), nw_be.verts_vbo, 0, NULL);
 }
 
 static void nw_be_ptls(const NwPacket *p)
@@ -688,12 +691,10 @@ static void nw_be_ptls(const NwPacket *p)
         return;
     }
     if (!nw_be.ptl_vao) {
-        glGenVertexArrays(1, &nw_be.ptl_vao);
-        glGenBuffers(1, &nw_be.ptl_vbo);
+        nw_be.ptl_vao = nw_rhi_vertex_array_create();
+        nw_be.ptl_vbo = nw_rhi_buffer_create(NW_RHI_VERTICES, NW_RHI_RGBA8);
     }
-    glBindVertexArray(nw_be.ptl_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, nw_be.ptl_vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)p->nptls * (GLsizeiptr)sizeof(*p->ptls), p->ptls, GL_STREAM_DRAW);
+    nw_rhi_buffer_data(nw_be.ptl_vbo, (size_t)p->nptls * sizeof(*p->ptls), p->ptls, true);
 }
 
 static void nw_be_undrawn(const NwVuProg *mpg, bool skin)
@@ -767,49 +768,44 @@ static void nw_be_tris(const NwPacket *p, const NwCmd *c)
         m.tex = &clut;
     }
     NwMtlPass pass[2];
-    glBindVertexArray(nw_be.verts_vao);
     uint32_t n = nw_vu_use(program, &o, &m, pass);
     if (c->stencil == NW_STENCIL_SHADOWED) {
-        glEnable(GL_STENCIL_TEST);
-        glStencilFunc(GL_LEQUAL, 0x80, 0xFF);
-        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        nw_rhi_stencil(true, NW_RHI_LEQUAL, 0x80, 0xFF, NW_RHI_KEEP, NW_RHI_KEEP, NW_RHI_KEEP);
     } else if (c->stencil) {
-        glEnable(GL_STENCIL_TEST);
-        glStencilFunc(GL_ALWAYS, 0, 0xFF);
-        glStencilOp(GL_KEEP, GL_KEEP, c->stencil > 0 ? GL_INCR_WRAP : GL_DECR_WRAP);
+        nw_rhi_stencil(true, NW_RHI_ALWAYS, 0, 0xFF, NW_RHI_KEEP, NW_RHI_KEEP,
+                       c->stencil > 0 ? NW_RHI_INCR_WRAP : NW_RHI_DECR_WRAP);
         nw_vu_pass(program, &m, &pass[0]);
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        glDepthMask(GL_FALSE);
-        glDrawArrays(GL_TRIANGLES, (GLint)c->first, (GLsizei)c->count);
-        glDisable(GL_STENCIL_TEST);
+        nw_rhi_colour_mask(false, false, false, false);
+        nw_rhi_depth_write(false);
+        nw_rhi_draw(nw_be.verts_vao, c->first, c->count);
+        nw_rhi_stencil(false, NW_RHI_ALWAYS, 0, 0xFF, NW_RHI_KEEP, NW_RHI_KEEP, NW_RHI_KEEP);
         return;
     }
     for (uint32_t k = 0; k < n; k++) {
         nw_vu_pass(program, &m, &pass[k]);
-        glDrawArrays(GL_TRIANGLES, (GLint)c->first, (GLsizei)c->count);
+        nw_rhi_draw(nw_be.verts_vao, c->first, c->count);
     }
-    glDisable(GL_STENCIL_TEST);
+    nw_rhi_stencil(false, NW_RHI_ALWAYS, 0, 0xFF, NW_RHI_KEEP, NW_RHI_KEEP, NW_RHI_KEEP);
 }
 
 /* Retail's NuLgtHSurf[1]: the back buffer's Z squeezed to the volumes' width into the target's Z, and the stencil at
    0x7F, as retail's 0x7F sprites start its colour. */
 static void nw_be_volumes(const NwCmd *c)
 {
-    NwBeSurf *back = NULL, *s = nw_be.target;
-    for (uint32_t i = 0; i < nw_be.nsurf && !back; i++) {
-        back = nw_be.surf[i].addr == NW_SURF_BACK ? &nw_be.surf[i] : NULL;
-    }
+    NwBeSurf *back = nw_be_back(), *s = nw_be.target;
     if (back && back != s && !s->ms) { /* a scaling blit neither reads nor writes multisampled buffers */
         nw_be_resolve(back);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, back->fbo);
-        glBlitFramebuffer(0, (back->th - nw_be.shown_h) * back->n, nw_be.shown_w * back->n, back->th * back->n, 0,
-                          (s->th - nw_be.height) * s->n, c->volumes.width * s->n, s->th * s->n, GL_DEPTH_BUFFER_BIT,
-                          GL_NEAREST);
-        glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+        nw_rhi_blit(&(NwRhiBlit){ .src_colour = back->tex, .src_depth = back->zatt, .dst_colour = s->tex,
+                                  .dst_depth = s->zatt,
+                                  .src = { 0, (back->th - nw_be.shown_h) * back->n, nw_be.shown_w * back->n,
+                                           back->th * back->n },
+                                  .dst = { 0, (s->th - nw_be.height) * s->n, c->volumes.width * s->n, s->th * s->n },
+                                  .depth = true });
+        nw_rhi_set_target(s->tex, s->zatt);
     }
-    glStencilMask(0xFF);
-    glClearStencil(0x7F);
-    glClear(GL_STENCIL_BUFFER_BIT);
+    nw_be.clear_s = 0x7F;
+    nw_rhi_stencil_write_mask(0xFF);
+    nw_rhi_clear(&(NwRhiClear){ .stencil = true, .s = 0x7F, .stencil_write = 0xFF });
 }
 
 /* A quad per particle: corners in GS units before the divide, texel coordinates in 1/16 of the texture's level 0. */
@@ -830,15 +826,13 @@ static void nw_be_particles(const NwPacket *p, const NwCmd *c)
         o.sprite[3] = 1.0f / (16.0f * (float)tex->tex.levels[0].height);
     }
     NwMtlPass pass[2];
-    glBindVertexArray(nw_be.ptl_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, nw_be.ptl_vbo);
-    nw_vu_ptl_attribs((size_t)c->first * sizeof(NwPtl));
+    nw_rhi_vertex_array_set(nw_be.ptl_vao, nw_vu_ptl_layout(), nw_be.ptl_vbo, (size_t)c->first * sizeof(NwPtl), NULL);
     NwVuProgram program = nw_vu_particle_program(m.tex, &m.state);
     uint32_t n = nw_vu_use(program, &o, &m, pass);
     nw_vu_ptl(program, (const uint32_t(*)[4])&p->ptllists[c->ptllist]);
     for (uint32_t k = 0; k < n; k++) {
         nw_vu_pass(program, &m, &pass[k]);
-        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)c->count);
+        nw_rhi_draw_instanced(nw_be.ptl_vao, 0, 6, c->count);
     }
 }
 
@@ -915,7 +909,7 @@ static bool nw_be_panel_view(const NwView *v)
 }
 
 /* What the gems see behind them: the target as the first of them since the last flush found it. */
-static GLuint nw_be_gem_backdrop(void)
+static NwRhiTexture *nw_be_gem_backdrop(void)
 {
     if (nw_be.copy_of != nw_be.target || nw_be.copy_run != nw_be.runs) {
         nw_be_dst();
@@ -924,8 +918,8 @@ static GLuint nw_be_gem_backdrop(void)
 }
 
 /* A [video] gems material in the gem programs, opaque; false when the view gives no eye (draw it as the PS2). */
-static bool nw_be_gem(const NwPacket *p, const NwCmd *c, NwVuProgram program, const NwGemInfo *gem, GLsizei count,
-                      const void *first)
+static bool nw_be_gem(const NwPacket *p, const NwCmd *c, NwVuProgram program, const NwGemInfo *gem,
+                      NwRhiVertexArray *va, NwRhiBuffer *indices, uint32_t first, uint32_t count)
 {
     NwVuGem g;
     memset(&g, 0, sizeof(g));
@@ -960,9 +954,9 @@ static bool nw_be_gem(const NwPacket *p, const NwCmd *c, NwVuProgram program, co
     g.kind = gem->kind;
     g.role = gem->role;
     g.panel = nw_be_panel_view(&p->views[c->view]);
-    glGetIntegerv(GL_VIEWPORT, g.viewport);
+    nw_rhi_viewport_get(g.viewport);
 
-    GLuint backdrop = nw_be_gem_backdrop();
+    NwRhiTexture *backdrop = nw_be_gem_backdrop();
     NwVuObject o;
     nw_be_object(p, c, program, &o);
     NwVuMaterial m = nw_be_material(p, c, false);
@@ -970,22 +964,18 @@ static bool nw_be_gem(const NwPacket *p, const NwCmd *c, NwVuProgram program, co
     NwMtlPass pass[2];
     nw_vu_use(program, &o, &m, pass);
     nw_vu_gem(program, &g);
-    glDepthFunc(GL_LEQUAL);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glDepthMask(GL_TRUE);
-    glActiveTexture(GL_TEXTURE0 + 8);
-    glBindTexture(GL_TEXTURE_2D, backdrop);
-    glActiveTexture(GL_TEXTURE0);
+    nw_rhi_depth(true, NW_RHI_LEQUAL);
+    nw_rhi_colour_mask(true, true, true, true);
+    nw_rhi_depth_write(true);
+    nw_rhi_bind_texture(8, backdrop);
     if (program == NW_VU_SKNGEM) {
         const NwGpuSkin *s = c->skin;
-        nw_vu_skin(program, c->first, c->weights, s->delta_tex ? c->nweights : 0);
-        if (s->delta_tex) {
-            glActiveTexture(GL_TEXTURE0 + 5);
-            glBindTexture(GL_TEXTURE_BUFFER, s->delta_tex);
-            glActiveTexture(GL_TEXTURE0);
+        nw_vu_skin(program, c->first, c->weights, s->deltas ? c->nweights : 0);
+        if (s->deltas) {
+            nw_rhi_bind_texels(5, s->deltas);
         }
     }
-    glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, first);
+    nw_rhi_draw_indexed(va, indices, first, count);
     return true;
 }
 
@@ -1069,32 +1059,16 @@ static void nw_be_draw(const NwPacket *p, const NwCmd *c)
     if (role == NW_GEM_HIDE || nw_be_gem_hold(p, c)) {
         return;
     }
-    if (role != NW_GEM_KEEP) {
-        bool ot = c->op == NW_CMD_DRAW_OT;
-        glBindVertexArray(mesh->vao);
-        if (ot) {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, nw_be.ot_ibo);
-        }
-        bool drawn = nw_be_gem(p, c, NW_VU_GEM, &gem, ot ? (GLsizei)c->count : (GLsizei)(mesh->mesh.ntris * 3),
-                               ot ? (const void *)(uintptr_t)(c->first * sizeof(uint32_t)) : NULL);
-        if (ot) {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ibo);
-        }
-        if (drawn) {
-            return;
-        }
+    bool ot = c->op == NW_CMD_DRAW_OT;
+    NwRhiBuffer *indices = ot ? nw_be.ot_ibo : NULL;
+    uint32_t first = ot ? c->first : 0, count = ot ? c->count : mesh->mesh.ntris * 3;
+    if (role != NW_GEM_KEEP && nw_be_gem(p, c, NW_VU_GEM, &gem, mesh->vao, indices, first, count)) {
+        return;
     }
     NwVuObject o;
     nw_be_object(p, c, program, &o);
     NwVuMaterial m = nw_be_material(p, c, mesh->mesh.uvrow);
-    glBindVertexArray(mesh->vao);
-    if (c->op == NW_CMD_DRAW_OT) {
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, nw_be.ot_ibo);
-        nw_be_passes(program, &o, &m, (GLsizei)c->count, (const void *)(uintptr_t)(c->first * sizeof(uint32_t)));
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ibo);
-    } else {
-        nw_be_passes(program, &o, &m, (GLsizei)(mesh->mesh.ntris * 3), NULL);
-    }
+    nw_be_passes(program, &o, &m, mesh->vao, indices, first, count);
 }
 
 /* A skin geom under its draw's palette and blend-shape weights, in the local matrix's space as vu1init sets it up. */
@@ -1115,27 +1089,21 @@ static void nw_be_skin(const NwPacket *p, const NwCmd *c)
     if (role == NW_GEM_HIDE || nw_be_gem_hold(p, c)) {
         return;
     }
-    if (role != NW_GEM_KEEP) {
-        glBindVertexArray(s->vao);
-        if (nw_be_gem(p, c, NW_VU_SKNGEM, &gem, (GLsizei)(s->skin.ntris * 3), NULL)) {
-            return;
-        }
+    if (role != NW_GEM_KEEP && nw_be_gem(p, c, NW_VU_SKNGEM, &gem, s->vao, NULL, 0, s->skin.ntris * 3)) {
+        return;
     }
     NwVuObject o;
     nw_be_object(p, c, program, &o);
     NwVuMaterial m = nw_be_material(p, c, false);
     NwMtlPass pass[2];
-    glBindVertexArray(s->vao);
     uint32_t n = nw_vu_use(program, &o, &m, pass);
-    nw_vu_skin(program, c->first, c->weights, s->delta_tex ? c->nweights : 0);
-    if (s->delta_tex) {
-        glActiveTexture(GL_TEXTURE0 + 5);
-        glBindTexture(GL_TEXTURE_BUFFER, s->delta_tex);
-        glActiveTexture(GL_TEXTURE0);
+    nw_vu_skin(program, c->first, c->weights, s->deltas ? c->nweights : 0);
+    if (s->deltas) {
+        nw_rhi_bind_texels(5, s->deltas);
     }
     for (uint32_t k = 0; k < n; k++) {
         nw_vu_pass(program, &m, &pass[k]);
-        glDrawElements(GL_TRIANGLES, (GLsizei)(s->skin.ntris * 3), GL_UNSIGNED_INT, NULL);
+        nw_rhi_draw_indexed(s->vao, NULL, 0, s->skin.ntris * 3);
     }
 }
 
@@ -1145,16 +1113,10 @@ static void nw_be_weights(const NwPacket *p)
         return;
     }
     if (!nw_be.weights) {
-        glGenBuffers(1, &nw_be.weights);
-        glGenTextures(1, &nw_be.weights_tex);
+        nw_be.weights = nw_rhi_buffer_create(NW_RHI_TEXELS, NW_RHI_R32F);
     }
-    glBindBuffer(GL_TEXTURE_BUFFER, nw_be.weights);
-    glBufferData(GL_TEXTURE_BUFFER, (GLsizeiptr)p->nweights * (GLsizeiptr)sizeof(*p->weights), p->weights,
-                 GL_STREAM_DRAW);
-    glActiveTexture(GL_TEXTURE0 + 4);
-    glBindTexture(GL_TEXTURE_BUFFER, nw_be.weights_tex);
-    glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, nw_be.weights);
-    glActiveTexture(GL_TEXTURE0);
+    nw_rhi_buffer_data(nw_be.weights, (size_t)p->nweights * sizeof(*p->weights), p->weights, true);
+    nw_rhi_bind_texels(4, nw_be.weights);
 }
 
 /* The packet's palettes as RGBA32F texels, four rows a matrix. */
@@ -1165,16 +1127,10 @@ static void nw_be_pool(const NwPacket *p)
         return;
     }
     if (!nw_be.pool) {
-        glGenBuffers(1, &nw_be.pool);
-        glGenTextures(1, &nw_be.pool_tex);
+        nw_be.pool = nw_rhi_buffer_create(NW_RHI_TEXELS, NW_RHI_RGBA32F);
     }
-    glBindBuffer(GL_TEXTURE_BUFFER, nw_be.pool);
-    glBufferData(GL_TEXTURE_BUFFER, (GLsizeiptr)p->njoints * (GLsizeiptr)sizeof(*p->joints), p->joints,
-                 GL_STREAM_DRAW);
-    glActiveTexture(GL_TEXTURE0 + 3);
-    glBindTexture(GL_TEXTURE_BUFFER, nw_be.pool_tex);
-    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, nw_be.pool);
-    glActiveTexture(GL_TEXTURE0);
+    nw_rhi_buffer_data(nw_be.pool, (size_t)p->njoints * sizeof(*p->joints), p->joints, true);
+    nw_rhi_bind_texels(3, nw_be.pool);
 }
 
 /* faceon: corner sizes in GS units before the divide, scaled by VU 0x16; facey: quads along VF15, the camera's right
@@ -1204,8 +1160,7 @@ static void nw_be_sprites(const NwPacket *p, const NwCmd *c)
         o.sprite[1] = -v->faceon[3] / (8.0f * (float)nw_be.height);
     }
     NwVuMaterial m = nw_be_material(p, c, false);
-    glBindVertexArray(s->vao);
-    nw_be_passes(s->sprites.facey ? NW_VU_FACEY : NW_VU_FACEON, &o, &m, (GLsizei)(s->sprites.count * 6), NULL);
+    nw_be_passes(s->sprites.facey ? NW_VU_FACEY : NW_VU_FACEON, &o, &m, s->vao, NULL, 0, s->sprites.count * 6);
 }
 
 /* Runs once into GS memory, which keeps what it drew; the front buffer is the back buffer as it ends. */
@@ -1222,20 +1177,17 @@ static void nw_be_run(const NwPacket *p, NwBeSurf *back)
     nw_be_bind(back, nw_be.shown_w, nw_be.shown_h);
     nw_be.alpha = true;
     nw_vu_alpha_writes(true);
-    glEnable(GL_DEPTH_TEST);
-    glPolygonMode(GL_FRONT_AND_BACK, nw_be.wireframe ? GL_LINE : GL_FILL);
+    nw_rhi_depth(true, NW_RHI_LESS); /* each draw sets its test */
+    nw_rhi_wireframe(nw_be.wireframe);
     nw_be_rects(p);
     nw_be_verts(p);
     nw_be_ptls(p);
     nw_be_pool(p);
     if (p->nidx) {
         if (!nw_be.ot_ibo) {
-            glGenBuffers(1, &nw_be.ot_ibo);
+            nw_be.ot_ibo = nw_rhi_buffer_create(NW_RHI_INDICES, NW_RHI_RGBA8);
         }
-        glBindVertexArray(0);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, nw_be.ot_ibo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)p->nidx * (GLsizeiptr)sizeof(uint32_t), p->idx,
-                     GL_STREAM_DRAW);
+        nw_rhi_buffer_data(nw_be.ot_ibo, (size_t)p->nidx * sizeof(uint32_t), p->idx, true);
     }
     uint32_t rects = 0;
     nw_be.nheld = 0;
@@ -1279,13 +1231,13 @@ static void nw_be_run(const NwPacket *p, NwBeSurf *back)
         }
     }
     nw_be_gems_flush(p, NULL);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    nw_rhi_wireframe(false);
     nw_be_resolve(back);
     NwBeSurf *front = nw_be_surf(NW_SURF_FRONT, back->tw, back->th);
     if (front) {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, back->fbo);
-        glBlitFramebuffer(0, 0, back->tw * back->n, back->th * back->n, 0, 0, front->tw * front->n,
-                          front->th * front->n, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        nw_rhi_blit(&(NwRhiBlit){ .src_colour = back->tex, .dst_colour = front->tex,
+                                  .src = { 0, 0, back->tw * back->n, back->th * back->n },
+                                  .dst = { 0, 0, front->tw * front->n, front->th * front->n }, .colour = true });
     }
     nw_be.drawn = p->seq;
 }
@@ -1341,24 +1293,15 @@ static void nw_be_present(NwBeSurf *back, int bw, int bh, int x, int y, int w, i
 {
     int n = back->n, level = 0;
     nw_be_resolve(back);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     while (level < 12 && (bw * n) >> (level + 1) >= w && (bh * n) >> (level + 1) >= h) {
         level++;
     }
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, back->fbo);
     if (level) {
-        glActiveTexture(GL_TEXTURE0 + 2);
-        glBindTexture(GL_TEXTURE_2D, back->tex);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        glActiveTexture(GL_TEXTURE0);
-        if (!nw_be.present_fbo) {
-            glGenFramebuffers(1, &nw_be.present_fbo);
-        }
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, nw_be.present_fbo);
-        glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, back->tex, level);
+        nw_rhi_generate_mips(back->tex);
     }
-    glBlitFramebuffer(0, ((back->th - bh) * n) >> level, (bw * n) >> level, (back->th * n) >> level, x, y, x + w,
-                      y + h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    nw_rhi_blit(&(NwRhiBlit){ .src_colour = back->tex, .src_level = level,
+                              .src = { 0, ((back->th - bh) * n) >> level, (bw * n) >> level, (back->th * n) >> level },
+                              .dst = { x, y, x + w, y + h }, .colour = true, .linear = true });
 }
 
 const NwPacket *nw_backend_frame(int width, int height, double now)
@@ -1401,22 +1344,21 @@ const NwPacket *nw_backend_frame(int width, int height, double now)
     int tw = 1 << nw_be_log2(bw), th = 1 << nw_be_log2(bh);
     nw_be.scale = nw_be_scale(h, bh, tw, th);
     nw_be.samples = nw_be_samples();
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE); /* the last pass's masks, which glClear honours */
-    glDepthMask(GL_TRUE);
+    nw_rhi_colour_mask(true, true, true, true); /* the last pass's masks */
+    nw_rhi_depth_write(true);
     NwBeSurf *back = nw_be_surf(NW_SURF_BACK, tw, th);
     if (back && p && (p->seq != nw_be.drawn || t != nw_be.drawn_t)) {
         nw_be_run(run, back);
         nw_be.drawn_t = t;
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthMask(GL_TRUE);
+        nw_rhi_colour_mask(true, true, true, true);
+        nw_rhi_depth_write(true);
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, width, height);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    nw_rhi_set_target(NULL, NULL);
+    nw_rhi_viewport(0, 0, width, height);
+    nw_rhi_clear(&(NwRhiClear){ .colour = true, .depth = true, .rgba = { 0.0f, 0.0f, 0.0f, 1.0f },
+                                .z = nw_be.clear_z, .mask = { true, true, true, true }, .depth_write = true });
     if (back) {
         nw_be_present(back, bw, bh, (width - w) / 2, (height - h) / 2, w, h);
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return p;
 }

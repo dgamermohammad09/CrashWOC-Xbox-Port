@@ -3,6 +3,11 @@
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_sdl3.h"
+#ifdef NW_RHI_HAVE_D3D11
+#include "imgui_impl_dx11.h"
+#endif
+
+#include "gfx/rhi.h"
 
 #define NW_UI_FONT_SIZE 20.0f
 #define NW_UI_COMPACT_FONT_SIZE 22.0f
@@ -122,6 +127,21 @@ bool nw_ui_init(NwPlatform *p, bool compact)
     nw_ui_fonts[NW_UI_BOLD] = nw_ui_add_font(nw_font_bold, nw_font_bold_size, "Atkinson Hyperlegible Bold");
     nw_ui_style(nw_ui_content_scale());
 
+#ifdef NW_RHI_HAVE_D3D11
+    /* Direct3D 11: the renderer's device and context. */
+    if (nw_rhi_kind() == NW_RHI_D3D11) {
+        if (!nw_ui_fonts[NW_UI_REGULAR] || !nw_ui_fonts[NW_UI_BOLD] || !ImGui_ImplSDL3_InitForD3D(p->window)) {
+            ImGui::DestroyContext();
+            return SDL_SetError("Dear ImGui could not start");
+        }
+        if (!ImGui_ImplDX11_Init((ID3D11Device *)nw_rhi_native(0), (ID3D11DeviceContext *)nw_rhi_native(1))) {
+            ImGui_ImplSDL3_Shutdown();
+            ImGui::DestroyContext();
+            return SDL_SetError("Dear ImGui could not start Direct3D 11");
+        }
+        return true;
+    }
+#endif
     if (!nw_ui_fonts[NW_UI_REGULAR] || !nw_ui_fonts[NW_UI_BOLD] || !ImGui_ImplSDL3_InitForOpenGL(p->window, p->gl)) {
         ImGui::DestroyContext();
         return SDL_SetError("Dear ImGui could not start");
@@ -136,6 +156,11 @@ bool nw_ui_init(NwPlatform *p, bool compact)
 
 void nw_ui_shutdown(void)
 {
+#ifdef NW_RHI_HAVE_D3D11
+    if (nw_rhi_kind() == NW_RHI_D3D11) {
+        ImGui_ImplDX11_Shutdown();
+    } else
+#endif
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
@@ -155,6 +180,11 @@ void nw_ui_event(const SDL_Event *e)
 
 void nw_ui_begin(void)
 {
+#ifdef NW_RHI_HAVE_D3D11
+    if (nw_rhi_kind() == NW_RHI_D3D11) {
+        ImGui_ImplDX11_NewFrame();
+    } else
+#endif
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -163,6 +193,13 @@ void nw_ui_begin(void)
 void nw_ui_end(void)
 {
     ImGui::Render();
+    nw_rhi_set_target(NULL, NULL); /* the window */
+#ifdef NW_RHI_HAVE_D3D11
+    if (nw_rhi_kind() == NW_RHI_D3D11) {
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
+#endif
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 

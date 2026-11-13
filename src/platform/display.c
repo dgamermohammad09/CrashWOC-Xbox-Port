@@ -1,5 +1,7 @@
 #include "platform/display.h"
 
+#include "gfx/rhi.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -108,11 +110,10 @@ float nw_display_refresh(SDL_Window *window)
 NwVsync nw_display_set_vsync(NwVsync vsync)
 {
     static const int intervals[NW_VSYNC_MODES] = { 0, 1, -1 };
-    int interval = 1;
-    if (!SDL_GL_SetSwapInterval(intervals[vsync]) && vsync == NW_VSYNC_ADAPTIVE) {
-        SDL_GL_SetSwapInterval(1);
+    if (!nw_rhi_set_vsync(intervals[vsync]) && vsync == NW_VSYNC_ADAPTIVE) {
+        nw_rhi_set_vsync(1);
     }
-    SDL_GL_GetSwapInterval(&interval);
+    int interval = nw_rhi_vsync();
     return interval < 0 ? NW_VSYNC_ADAPTIVE : interval ? NW_VSYNC_ON : NW_VSYNC_OFF;
 }
 

@@ -13,7 +13,7 @@
 #include "frontend/help.h"
 #include "frontend/ui.h"
 #include "frontend/wizard.h"
-#include "gfx/gl.h"
+#include "gfx/rhi.h"
 #include "platform/buildid.h"
 #include "platform/discord.h"
 #include "platform/log.h"
@@ -1213,7 +1213,7 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
         nw_display_size(platform.window, &width, &height);
         nw_backend_frame(width, height, settings.interpolation ? nw_game_edge_time() : -1.0);
         nw_debug_frame();
-        SDL_GL_SwapWindow(platform.window);
+        nw_rhi_present();
     }
     nw_discord_stop();
     if (unsaved) {
@@ -1254,7 +1254,7 @@ static int nw_capture(const char *data_dir, const char *list, const char *dir, b
         return code ? code : 1;
     }
     SDL_HideWindow(platform.window);
-    SDL_GL_SetSwapInterval(0);
+    nw_rhi_set_vsync(0);
     nw_stub_set_continue(true);
     if (!nw_game_start(nw_game_main, 1, nw_game_argv)) {
         fprintf(stderr, NW_APP_NAME ": no game thread: %s\n", SDL_GetError());
@@ -1283,7 +1283,7 @@ static int nw_capture(const char *data_dir, const char *list, const char *dir, b
             SDL_free(path);
             nw_capture_release();
         }
-        SDL_GL_SwapWindow(platform.window);
+        nw_rhi_present();
     }
     bool finished = nw_capture_finished();
     bool parked = nw_game_parked();
@@ -1531,15 +1531,16 @@ static int nw_setup(const char *data_dir, int max_frames, NwPlatform *window)
 
         int width, height;
         SDL_GetWindowSizeInPixels(platform.window, &width, &height);
-        glViewport(0, 0, width, height);
-        glClearColor(0.05f, 0.08f, 0.16f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        nw_rhi_set_target(NULL, NULL);
+        nw_rhi_viewport(0, 0, width, height);
+        nw_rhi_clear(&(NwRhiClear){ .colour = true, .depth = true, .rgba = { 0.05f, 0.08f, 0.16f, 1.0f }, .z = 1.0,
+                                    .mask = { true, true, true, true }, .depth_write = true });
         nw_ui_begin();
         if (result == NW_WIZARD_OPEN) {
             result = nw_wizard_draw(wizard);
         }
         nw_ui_end();
-        SDL_GL_SwapWindow(platform.window);
+        nw_rhi_present();
 
         if (max_frames > 0 && ++frames >= max_frames) {
             result = NW_WIZARD_QUIT;
@@ -1619,6 +1620,7 @@ int main(int argc, char *argv[])
     int boot_loads = 0; /* --loads: background loads instead of vblanks */
     int hardware_speed = -1; /* --hardware-speed on|off; -1: as the mode has it */
     const char *aspect_arg = NULL; /* --aspect auto|W:H|ratio */
+    const char *renderer = NULL;   /* --renderer opengl|d3d11, else settings.toml's [video] renderer */
 
     nw_log_init(argc, argv);
     for (int i = 1; i < argc; i++) {
@@ -1634,7 +1636,7 @@ int main(int argc, char *argv[])
              strcmp(argv[i], "--poke") == 0 || strcmp(argv[i], "--dump-after") == 0 ||
              strcmp(argv[i], "--level") == 0 || strcmp(argv[i], "--pad-script") == 0 ||
              strcmp(argv[i], "--aspect") == 0 || strcmp(argv[i], "--hz") == 0 ||
-             strcmp(argv[i], "--overlay") == 0) &&
+             strcmp(argv[i], "--overlay") == 0 || strcmp(argv[i], "--renderer") == 0) &&
             i + 1 >= argc) {
             fprintf(stderr, NW_APP_NAME ": %s needs a value\n", argv[i]);
             return 2;
@@ -1719,6 +1721,18 @@ int main(int argc, char *argv[])
             hardware_speed = strcmp(value, "on") == 0;
         } else if (strcmp(argv[i], "--aspect") == 0) {
             aspect_arg = argv[++i];
+        } else if (strcmp(argv[i], "--renderer") == 0) {
+            renderer = argv[++i];
+            NwRhiKind kind;
+            if (!nw_rhi_kind_parse(renderer, &kind)) {
+                fprintf(stderr, NW_APP_NAME ": --renderer takes opengl or d3d11 (d3d12, vulkan: not yet)\n");
+                return 2;
+            }
+            if (!nw_rhi_kind_available(kind)) {
+                fprintf(stderr, NW_APP_NAME ": --renderer %s is not built into this executable\n", renderer);
+                return 2;
+            }
+            nw_rhi_select(kind);
         } else if (strcmp(argv[i], "--hz") == 0) {
             const char *value = argv[++i];
             if (strcmp(value, "50") != 0 && strcmp(value, "60") != 0) {
@@ -1748,6 +1762,15 @@ int main(int argc, char *argv[])
     if (verify) {
         return nw_verify(data_dir);
     }
+    /* The renderer every window takes: --renderer, else settings.toml's, else the platform's. */
+#ifdef NW_WITH_GAME
+    if (!renderer) {
+        NwSettings settings;
+        nw_settings_defaults(&settings);
+        nw_boot_settings(data_dir, &settings, false);
+        nw_rhi_select(settings.renderer ? (NwRhiKind)(settings.renderer - 1) : nw_rhi_kind_default());
+    }
+#endif
     /* Without a mode the game starts; the first start (no imported disc) and --setup ask for the disc first. */
     NwPlatform window = { 0 }; /* the setup's window, which the game takes over */
     if (!(check_data || check_scenes || check_disc || scene || scene_check || boot_check || capture || dump)) {

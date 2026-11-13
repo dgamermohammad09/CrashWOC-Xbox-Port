@@ -183,6 +183,7 @@ static const char *nw_settings_hud_format(const void *field, char *buf, int size
 static const char *const nw_settings_windows[NW_WINDOW_MODES] = { "windowed", "borderless", "fullscreen" };
 static const char *const nw_settings_vsyncs[NW_VSYNC_MODES] = { "off", "on", "adaptive" };
 static const char *const nw_settings_filters[NW_FILTERS] = { "retail", "nearest", "bilinear" };
+static const char *const nw_settings_renderers[NW_RENDERERS] = { "auto", "opengl", "d3d11", "d3d12", "vulkan" };
 _Static_assert(sizeof(NwWindowMode) == sizeof(int) && sizeof(NwVsync) == sizeof(int) &&
                    sizeof(NwTexFilter) == sizeof(int) && sizeof(NwPromptStyle) == sizeof(int),
                "NW_SETTING_ENUM fields are int-sized");
@@ -256,6 +257,9 @@ static const NwSettingKey nw_settings_keys[] = {
       .help = "multisampling: 0 (off), 2, 4 or 8 samples, at most the GPU's" },
     { .table = "video", .name = "filter", .kind = NW_SETTING_ENUM, NW_FIELD(filter), .hi = NW_FILTERS,
       .names = nw_settings_filters, .help = "textures: retail (the PS2's, per texture), nearest or bilinear" },
+    { .table = "video", .name = "renderer", .kind = NW_SETTING_ENUM, NW_FIELD(renderer), .hi = NW_RENDERERS,
+      .names = nw_settings_renderers,
+      .help = "auto (OpenGL on a PC, Direct3D 11 on Xbox), opengl or d3d11 (d3d12, vulkan: planned); next start" },
     { .table = "video", .name = "gems", .kind = NW_SETTING_BOOL, NW_FIELD(gems),
       .help = "true draws gems, crystals and relics as cut stone and polished metal; false as the PS2" },
     { .table = "video", .name = "draw_distance", .kind = NW_SETTING_INT, NW_FIELD(draw_distance), .lo = 100,
@@ -354,6 +358,7 @@ void nw_settings_defaults(NwSettings *s)
     s->msaa = 0;
     s->filter = NW_FILTER_RETAIL;
     s->gems = true;
+    s->renderer = NW_RENDERER_AUTO;
     s->draw_distance = 400;
     nw_controls_defaults(&s->controls);
 }

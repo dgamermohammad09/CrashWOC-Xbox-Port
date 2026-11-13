@@ -9,7 +9,7 @@
 
 extern "C" {
 #include "frontend/import.h"
-#include "gfx/gl.h"
+#include "gfx/rhi.h"
 #include "platform/paths.h"
 #include "vfs/extract.h"
 
@@ -44,7 +44,7 @@ struct NwWizard {
     Uint64 scanned;  /* SDL_GetTicks of the last scan, 0 = never */
     char notice[512];
     char error[512];
-    GLuint shot; /* the welcome page's debug menu screenshot, 0 = not loaded */
+    NwRhiTexture *shot; /* the welcome page's debug menu screenshot, NULL = not loaded */
     int shot_w, shot_h;
     bool zoom; /* the screenshot fills the window */
 #ifdef NW_UWP
@@ -164,7 +164,7 @@ void nw_wizard_destroy(NwWizard *w)
     SDL_free(w->usb);
 #endif
     if (w->shot) {
-        glDeleteTextures(1, &w->shot);
+        nw_rhi_texture_destroy(w->shot);
     }
     SDL_free(w->image);
     SDL_free(w->import_dir);
@@ -477,13 +477,8 @@ static void nw_wizard_load_shot(NwWizard *w)
         SDL_DestroySurface(rgba);
         return;
     }
-    glGenTextures(1, &w->shot);
-    glBindTexture(GL_TEXTURE_2D, w->shot);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, rgba->w, rgba->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    const void *level = rgba->pixels;
+    w->shot = nw_rhi_texture_create(NW_RHI_RGBA8, rgba->w, rgba->h, 1, 1, NW_RHI_TEX_LINEAR, &level);
     w->shot_w = rgba->w;
     w->shot_h = rgba->h;
     SDL_DestroySurface(rgba);
@@ -527,7 +522,7 @@ static NwWizardResult nw_wizard_welcome(NwWizard *w)
             width = most * (float)w->shot_w / (float)w->shot_h;
             height = most;
         }
-        ImGui::Image((ImTextureID)w->shot, ImVec2(width, height));
+        ImGui::Image((ImTextureID)nw_rhi_texture_ui(w->shot), ImVec2(width, height));
         if (ImGui::IsItemHovered()) {
             ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
             ImGui::SetTooltip("Click to enlarge");

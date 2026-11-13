@@ -1,4 +1,4 @@
-/* The VU1 microcode as GLSL: needs a current GL 3.3 context. */
+/* The VU1 microcode as GLSL (src/gfx/shaders/), drawn through the renderer's GPU interface (gfx/rhi.h). */
 #ifndef NUWORLD_GFX_VU_H
 #define NUWORLD_GFX_VU_H
 
@@ -8,6 +8,9 @@
 
 #include "gfx/mtl.h"
 #include "gfx/tex.h"
+
+typedef struct NwRhiTexture NwRhiTexture;
+typedef struct NwRhiVertexLayout NwRhiVertexLayout;
 
 /* How game textures are filtered; render targets and depth CLUTs keep the GS's. */
 typedef enum NwTexFilter {
@@ -74,10 +77,10 @@ typedef struct NwLights {
 /* A texture on the GPU: CLUT indices (R8UI) and the CLUT (256x1 RGBA8UI), or colours (RGBA8UI) and no CLUT, or a
    surface the renderer draws into (RGBA8: colour / 255, alpha / 128, GS row y at row height - 1 - y). */
 typedef struct NwVuTexture {
-    unsigned int index, clut;
+    NwRhiTexture *index, *clut;
     bool tcc; /* TEX0.TCC */
     bool surface;
-    unsigned int rgba; /* particle-only RGBA8UI cache: GS bytes with the palette already applied */
+    NwRhiTexture *rgba; /* particle-only RGBA8UI cache: GS bytes with the palette already applied */
     uint8_t alpha_min, alpha_max; /* conservative bounds across the particle texture's mip levels */
     bool power_of_two;
 } NwVuTexture;
@@ -86,7 +89,7 @@ typedef struct NwVuTexture {
    depth texture, the CLUT (256x1 RGBA8UI), and the lookup; clear: 0 none, 1 NuLightFogClear's, 2 a spot light's,
    then its two Z; ad: NwZClut's, the blend's Ad from it. */
 typedef struct NwVuZClut {
-    unsigned int depth, clut;
+    NwRhiTexture *depth, *clut;
     uint32_t shift, base, far, near;
     uint32_t clear[3];
     bool alpha;
@@ -119,8 +122,8 @@ void nw_vu_waves(const float waves[32][4]);
 /* ptl's VU 0x3C-0xBF: the effect list as NwPtlList holds it. */
 void nw_vu_ptl(NwVuProgram program, const uint32_t image[132][4]);
 NwVuProgram nw_vu_particle_program(const NwVuTexture *texture, const NwMtlState *state);
-/* The NwPtl attributes of the bound VBO from the byte offset on, one particle per instance. */
-void nw_vu_ptl_attribs(size_t offset);
+/* The NwPtl attributes, one particle per instance. */
+const NwRhiVertexLayout *nw_vu_ptl_layout(void);
 /* vu1init and clipinit alike (src/gfx/vu1init.c), unlit: the GPU clips, so clip and trivclip need no counterpart. */
 void nw_vu1init(NwVuObject *o, const float local[16], const float view[16]);
 /* Their lights for a lit stream (mode 1): each direction dotted with the normalised rows of the local matrix, the
@@ -151,11 +154,11 @@ void nw_vu_texture(NwVuTexture *tex, const NwTex *t);
 void nw_vu_texture_free(NwVuTexture *tex);
 /* Lazily expands a particle texture's palette; keeps GS alpha (0x80 = 1), including values above 0x80. */
 bool nw_vu_texture_rgba(NwVuTexture *tex, const NwTex *t);
-/* The NwVifVertex attributes of the bound VAO and VBO. */
-void nw_vu_attribs(void);
-/* The NwVuSpriteVertex attributes of the bound VAO and VBO. */
-void nw_vu_sprite_attribs(void);
-/* The NwVifSkinVertex attributes of the bound VAO and VBO. */
-void nw_vu_skin_attribs(void);
+/* The NwVifVertex attributes. */
+const NwRhiVertexLayout *nw_vu_layout(void);
+/* The NwVuSpriteVertex attributes. */
+const NwRhiVertexLayout *nw_vu_sprite_layout(void);
+/* The NwVifSkinVertex attributes. */
+const NwRhiVertexLayout *nw_vu_skin_layout(void);
 
 #endif

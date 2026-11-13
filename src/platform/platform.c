@@ -1,7 +1,7 @@
 #include "platform/platform.h"
 
 #include "app.h"
-#include "gfx/gl.h"
+#include "gfx/rhi.h"
 
 static void nw_platform_fail(const char *what)
 {
@@ -36,15 +36,9 @@ bool nw_platform_init(NwPlatform *p, const char *title, int width, int height)
         return false;
     }
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-
-    p->window = SDL_CreateWindow(title, width, height,
-                                 SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    /* The renderer's window: OpenGL's needs SDL_WINDOW_OPENGL and its context attributes, Direct3D's nothing. */
+    SDL_WindowFlags api = nw_rhi_prepare_window();
+    p->window = SDL_CreateWindow(title, width, height, api | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!p->window) {
         nw_platform_fail("Could not create the window");
         nw_platform_shutdown(p);
@@ -54,28 +48,21 @@ bool nw_platform_init(NwPlatform *p, const char *title, int width, int height)
     nw_platform_icon(p->window);
 #endif
 
-    p->gl = SDL_GL_CreateContext(p->window);
-    if (!p->gl) {
-        nw_platform_fail("OpenGL 3.3 is required");
+    if (!nw_rhi_init(p->window)) {
+        nw_platform_fail(nw_rhi_kind() == NW_RHI_OPENGL ? "OpenGL 3.3 is required" : "The renderer could not start");
         nw_platform_shutdown(p);
         return false;
     }
-
-    if (!nw_gl_load()) {
-        nw_platform_fail("Could not load the OpenGL functions");
-        nw_platform_shutdown(p);
-        return false;
-    }
-
-    SDL_GL_SetSwapInterval(1);
-    SDL_Log("OpenGL %s (%s)", (const char *)glGetString(GL_VERSION), (const char *)glGetString(GL_RENDERER));
+    p->gl = nw_rhi_kind() == NW_RHI_OPENGL ? nw_rhi_native(0) : NULL;
+    p->rhi = true;
+    SDL_Log("renderer: %s: %s", nw_rhi_kind_name(nw_rhi_kind()), nw_rhi_description());
     return true;
 }
 
 void nw_platform_shutdown(NwPlatform *p)
 {
-    if (p->gl) {
-        SDL_GL_DestroyContext(p->gl);
+    if (p->rhi) {
+        nw_rhi_shutdown();
     }
     if (p->window) {
         SDL_DestroyWindow(p->window);

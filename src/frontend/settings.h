@@ -12,6 +12,9 @@
 
 #define NW_FPS_MAX 1000
 #define NW_DRAW_DISTANCE_MAX 400
+/* [video] renderer: auto, then gfx/rhi.h's NwRhiKind + 1 in its order. */
+#define NW_RENDERER_AUTO 0
+#define NW_RENDERERS 5
 
 typedef struct NwSettings {
     bool hardware_speed; /* [game]: the PS2's disc and sound load times instead of instant loads */
@@ -39,6 +42,7 @@ typedef struct NwSettings {
     int msaa;
     NwTexFilter filter;
     bool gems; /* gems, crystals and relics as cut stone and polished metal */
+    int renderer; /* NW_RENDERER_AUTO (the platform's) or 1 + gfx/rhi.h's NwRhiKind, taken at the next start */
     int draw_distance; /* percent of the PS2's */
     NwControls controls; /* [input], [pad], [keyboard] */
 } NwSettings;

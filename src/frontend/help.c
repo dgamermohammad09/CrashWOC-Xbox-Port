@@ -2,7 +2,7 @@
 
 #include "app.h"
 #include "frontend/debug.h"
-#include "gfx/gl.h"
+#include "gfx/rhi.h"
 #include "platform/buildid.h"
 #include "platform/log.h"
 #include "vfs/extract.h"
@@ -26,12 +26,6 @@ static void nw_help_open(void *url)
     }
 }
 
-static const char *nw_help_gl(GLenum name)
-{
-    const GLubyte *s = glGetString(name);
-    return s ? (const char *)s : "?";
-}
-
 static void nw_help_info(void *unused)
 {
     (void)unused;
@@ -48,13 +42,13 @@ static void nw_help_info(void *unused)
     SDL_asprintf(&text,
                  NW_APP_NAME " %s (decomp %s)\n"
                  "%s, %d CPU threads, %d MB RAM, SDL %d.%d.%d\n"
-                 "OpenGL %s, %s, %s\n"
+                 "Renderer %s: %s\n"
                  "Display %s, window %dx%d%s\n"
                  "Disc %s\n"
                  "Data folder %s\n",
                  nw_build_id, nw_build_decomp, SDL_GetPlatform(), SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM(),
                  SDL_VERSIONNUM_MAJOR(sdl), SDL_VERSIONNUM_MINOR(sdl), SDL_VERSIONNUM_MICRO(sdl),
-                 nw_help_gl(GL_VERSION), nw_help_gl(GL_RENDERER), nw_help_gl(GL_VENDOR), display, w, h,
+                 nw_rhi_kind_name(nw_rhi_kind()), nw_rhi_description(), display, w, h,
                  fullscreen ? " fullscreen" : "", disc ? disc->name : "not imported", folder ? folder : "?");
     if (text && SDL_SetClipboardText(text)) {
         SDL_Log("help: system info copied to the clipboard");

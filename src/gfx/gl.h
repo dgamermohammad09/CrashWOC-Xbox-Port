@@ -194,7 +194,16 @@ typedef ptrdiff_t GLsizeiptr;
     X(void, glFramebufferRenderbuffer, \
         (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer)) \
     X(void, glBlitFramebuffer, (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, \
-        GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter))
+        GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter)) \
+    X(void, glUniform1fv, (GLint location, GLsizei count, const GLfloat *value)) \
+    X(void, glUniform2fv, (GLint location, GLsizei count, const GLfloat *value)) \
+    X(void, glUniform1iv, (GLint location, GLsizei count, const GLint *value)) \
+    X(void, glUniform2iv, (GLint location, GLsizei count, const GLint *value)) \
+    X(void, glUniform3iv, (GLint location, GLsizei count, const GLint *value)) \
+    X(void, glUniform4iv, (GLint location, GLsizei count, const GLint *value)) \
+    X(void, glUniform1uiv, (GLint location, GLsizei count, const GLuint *value)) \
+    X(void, glUniform2uiv, (GLint location, GLsizei count, const GLuint *value)) \
+    X(void, glUniform3uiv, (GLint location, GLsizei count, const GLuint *value))
 
 #define NW_GL_DECLARE(ret, name, params) \
     typedef ret (NW_GLAPI *PFN_nw_##name) params; \
@@ -283,6 +292,15 @@ NW_GL_FUNCTIONS(NW_GL_DECLARE)
 #define glRenderbufferStorageMultisample nw_glRenderbufferStorageMultisample
 #define glFramebufferRenderbuffer nw_glFramebufferRenderbuffer
 #define glBlitFramebuffer nw_glBlitFramebuffer
+#define glUniform1fv nw_glUniform1fv
+#define glUniform2fv nw_glUniform2fv
+#define glUniform1iv nw_glUniform1iv
+#define glUniform2iv nw_glUniform2iv
+#define glUniform3iv nw_glUniform3iv
+#define glUniform4iv nw_glUniform4iv
+#define glUniform1uiv nw_glUniform1uiv
+#define glUniform2uiv nw_glUniform2uiv
+#define glUniform3uiv nw_glUniform3uiv
 
 /* Loads every function in NW_GL_FUNCTIONS; needs a current GL context. */
 bool nw_gl_load(void);

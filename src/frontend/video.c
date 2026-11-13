@@ -5,6 +5,7 @@
 #include "app.h"
 #include "frontend/debug.h"
 #include "gfx/interp.h"
+#include "gfx/rhi.h"
 #include "port/wide.h"
 
 #define NW_VIDEO_SIZES 32  /* resolutions the panel lists */
@@ -209,6 +210,31 @@ static void nw_video_panel(void *user)
     int gems = s->gems;
     if (nw_debug_combo("Gems and relics", &gems, looks, 2)) {
         s->gems = gems;
+    }
+    /* settings.toml's renderer: auto, then NwRhiKind + 1; the ones not built in say so. */
+    static const char *const apis[NW_RENDERERS - 1] = { "OpenGL", "Direct3D 11", "Direct3D 12", "Vulkan" };
+    char names[NW_RENDERERS][48];
+    const char *items[NW_RENDERERS];
+    SDL_snprintf(names[0], sizeof(names[0]), "Auto (%s)", apis[nw_rhi_kind_default()]);
+    for (int i = 1; i < NW_RENDERERS; i++) {
+        SDL_snprintf(names[i], sizeof(names[i]), "%s%s", apis[i - 1],
+                     nw_rhi_kind_available((NwRhiKind)(i - 1)) ? "" : " (not built in)");
+    }
+    for (int i = 0; i < NW_RENDERERS; i++) {
+        items[i] = names[i];
+    }
+    int renderer = s->renderer;
+    if (nw_debug_combo("Renderer", &renderer, items, NW_RENDERERS)) {
+        s->renderer = renderer;
+    }
+    NwRhiKind want = s->renderer ? (NwRhiKind)(s->renderer - 1) : nw_rhi_kind_default();
+    if (!nw_rhi_kind_available(want)) {
+        want = nw_rhi_kind_default();
+    }
+    if (want != nw_rhi_kind()) {
+        nw_debug_text("%s takes effect at the next start", apis[want]);
+    } else {
+        nw_debug_tooltip("Takes effect at the next start");
     }
     nw_debug_slider_int("Draw distance %", &s->draw_distance, 100, NW_DRAW_DISTANCE_MAX);
     nw_debug_tooltip("How far objects are drawn; 100 is the PS2's");

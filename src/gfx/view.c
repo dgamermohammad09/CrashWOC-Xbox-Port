@@ -5,6 +5,7 @@
 #include "app.h"
 #include "frontend/debug.h"
 #include "gfx/backend.h"
+#include "gfx/rhi.h"
 #include "port/game.h"
 #include "port/scene.h"
 #include "shim/shim.h"
@@ -153,7 +154,7 @@ int nw_view_scene(NwPlatform *p, const char *name, int max_frames)
         SDL_GetWindowSizeInPixels(p->window, &width, &height);
         nw_backend_frame(width, height, -1.0);
         nw_debug_frame();
-        SDL_GL_SwapWindow(p->window);
+        nw_rhi_present();
         if (max_frames > 0 && ++frames >= max_frames) {
             running = false;
         }
