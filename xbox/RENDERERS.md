@@ -119,7 +119,7 @@ Not covered by `--capture` (it draws at scale 1 without MSAA), so checked by scr
 - Setup wizard (`--setup`): `verify/wizard_d3d11.png` vs `verify/wizard_opengl.png`, mean difference 0.14 (the
   animated background).
 - Desktop game window, D3D11: `verify/desk_d3d11_game_crop.png`.
-- **UWP package** (`out/NuWorld_0.8.316.1356_x64.msix`, 0 imports outside the UWP API set), run in the AppContainer
+- **UWP package** (`out/NuWorld_0.8.316.1363_x64.msix, build 97199bc`, 0 imports outside the UWP API set), run in the AppContainer
   on this PC with `renderer = "auto"`, so D3D11 by default, without the Mesa env lines: log
   `renderer: d3d11: Direct3D 11 (feature level 11_0), VMware SVGA 3D`, launcher `verify/uwp_d3d11_launcher.png`,
   title menu 30 s later `verify/uwp_d3d11_title_menu.png`. The same package with `--renderer opengl` (Mesa on WARP)
