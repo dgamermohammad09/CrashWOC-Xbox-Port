@@ -8,7 +8,7 @@ cbuffer Blit : register(b0)
     float4 map;    // xy: the source rectangle's corner, zw: the destination's (GL rows)
     float4 scale;  // xy: source pixels per destination pixel, z: flip (0 none), w: the source's mip level
     float4 colour; // the clear's
-    float4 depth;  // x: the clear's
+    float4 depth;  // x: the clear's; yz (Vulkan): the linear blit's source level size
 };
 
 Texture2D<float4> src_colour : register(t0);
@@ -36,9 +36,15 @@ float4 ps_point(float4 p : SV_Position) : SV_Target
 
 float4 ps_linear(float4 p : SV_Position) : SV_Target
 {
+#ifdef NW_VULKAN
+    // Mesa Dozen fails to build a pipeline with GetDimensions of a mip level: rhi_vk.c passes the size
+    float2 size = depth.yz;
+#else
     uint w, h, n;
     src_colour.GetDimensions((uint)scale.w, w, h, n);
-    return src_colour.SampleLevel(linear_clamp, src_pos(p) / float2(w, h), scale.w);
+    float2 size = float2(w, h);
+#endif
+    return src_colour.SampleLevel(linear_clamp, src_pos(p) / size, scale.w);
 }
 
 float ps_depth(float4 p : SV_Position) : SV_Depth

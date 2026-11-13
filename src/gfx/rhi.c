@@ -9,6 +9,9 @@ static const NwRhiBackend *const nw_rhi_backends[NW_RHI_KINDS] = {
 #ifdef NW_RHI_HAVE_D3D12
     [NW_RHI_D3D12] = &nw_rhi_d3d12,
 #endif
+#ifdef NW_RHI_HAVE_VULKAN
+    [NW_RHI_VULKAN] = &nw_rhi_vulkan,
+#endif
 };
 
 static const char *const nw_rhi_names[NW_RHI_KINDS] = { "opengl", "d3d11", "d3d12", "vulkan" };

@@ -11,6 +11,11 @@
 
 #include "gfx/rhi_d3d12.h"
 #endif
+#ifdef NW_RHI_HAVE_VULKAN
+#include "imgui_impl_vulkan.h"
+
+#include "gfx/rhi_vk.h"
+#endif
 
 #include "gfx/rhi.h"
 
@@ -40,6 +45,36 @@ static void nw_ui_dx12_free(ImGui_ImplDX12_InitInfo *, D3D12_CPU_DESCRIPTOR_HAND
 {
     nw_rhi_d3d12_ui_free(gpu.ptr);
 }
+#endif
+
+#ifdef NW_RHI_HAVE_VULKAN
+/* Dear ImGui's Vulkan functions come from the renderer's driver (there is no loader to link on Xbox). */
+static void VKAPI_PTR nw_ui_vk_missing(void)
+{
+}
+
+/* Functions the driver lacks (the surface ones when the window is not a Vulkan surface) are only used by Dear
+   ImGui's own window helpers, which NuWorld never calls: a stub keeps ImGui_ImplVulkan_LoadFunctions happy. */
+static PFN_vkVoidFunction nw_ui_vk_load(const char *name, void *)
+{
+    PFN_vkVoidFunction f = (PFN_vkVoidFunction)nw_rhi_vk_proc(name);
+    if (!f) {
+        SDL_Log("Vulkan: Dear ImGui's %s is not in the driver", name);
+    }
+    return f ? f : nw_ui_vk_missing;
+}
+
+static uint64_t nw_ui_vk_add(uint64_t view, int layout)
+{
+    return (uint64_t)(uintptr_t)ImGui_ImplVulkan_AddTexture((VkImageView)(uintptr_t)view, (VkImageLayout)layout);
+}
+
+static void nw_ui_vk_remove(uint64_t set)
+{
+    ImGui_ImplVulkan_RemoveTexture((VkDescriptorSet)(uintptr_t)set);
+}
+
+static VkFormat nw_ui_vk_format;
 #endif
 
 static ImFont *nw_ui_add_font(const unsigned char *data, size_t size, const char *name)
@@ -195,6 +230,40 @@ bool nw_ui_init(NwPlatform *p, bool compact)
         return true;
     }
 #endif
+#ifdef NW_RHI_HAVE_VULKAN
+    /* Vulkan: the renderer's device; it records into the renderer's command buffer, in its rendering of the window. */
+    if (nw_rhi_kind() == NW_RHI_VULKAN) {
+        if (!nw_ui_fonts[NW_UI_REGULAR] || !nw_ui_fonts[NW_UI_BOLD] || !ImGui_ImplSDL3_InitForVulkan(p->window)) {
+            ImGui::DestroyContext();
+            return SDL_SetError("Dear ImGui could not start");
+        }
+        ImGui_ImplVulkan_InitInfo info = {};
+        info.ApiVersion = nw_rhi_vk_api_version();
+        info.Instance = (VkInstance)nw_rhi_native(0);
+        info.PhysicalDevice = (VkPhysicalDevice)nw_rhi_native(1);
+        info.Device = (VkDevice)nw_rhi_native(2);
+        info.Queue = (VkQueue)nw_rhi_native(3);
+        info.QueueFamily = (uint32_t)(uintptr_t)nw_rhi_native(4);
+        info.DescriptorPoolSize = 64;
+        info.MinImageCount = 2;
+        info.ImageCount = (uint32_t)(uintptr_t)nw_rhi_native(7);
+        info.UseDynamicRendering = true;
+        nw_ui_vk_format = (VkFormat)(uintptr_t)nw_rhi_native(6);
+        VkPipelineRenderingCreateInfoKHR &ri = info.PipelineInfoMain.PipelineRenderingCreateInfo;
+        ri = {};
+        ri.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+        ri.colorAttachmentCount = 1;
+        ri.pColorAttachmentFormats = &nw_ui_vk_format;
+        info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        if (!ImGui_ImplVulkan_LoadFunctions(info.ApiVersion, nw_ui_vk_load) || !ImGui_ImplVulkan_Init(&info)) {
+            ImGui_ImplSDL3_Shutdown();
+            ImGui::DestroyContext();
+            return SDL_SetError("Dear ImGui could not start Vulkan");
+        }
+        nw_rhi_vk_ui_textures(nw_ui_vk_add, nw_ui_vk_remove);
+        return true;
+    }
+#endif
     if (!nw_ui_fonts[NW_UI_REGULAR] || !nw_ui_fonts[NW_UI_BOLD] || !ImGui_ImplSDL3_InitForOpenGL(p->window, p->gl)) {
         ImGui::DestroyContext();
         return SDL_SetError("Dear ImGui could not start");
@@ -218,6 +287,13 @@ void nw_ui_shutdown(void)
     if (nw_rhi_kind() == NW_RHI_D3D12) {
         nw_rhi_d3d12_idle(); /* its buffers may still be read */
         ImGui_ImplDX12_Shutdown();
+    } else
+#endif
+#ifdef NW_RHI_HAVE_VULKAN
+    if (nw_rhi_kind() == NW_RHI_VULKAN) {
+        nw_rhi_vk_idle();
+        nw_rhi_vk_ui_textures(NULL, NULL);
+        ImGui_ImplVulkan_Shutdown();
     } else
 #endif
     ImGui_ImplOpenGL3_Shutdown();
@@ -249,6 +325,11 @@ void nw_ui_begin(void)
         ImGui_ImplDX12_NewFrame();
     } else
 #endif
+#ifdef NW_RHI_HAVE_VULKAN
+    if (nw_rhi_kind() == NW_RHI_VULKAN) {
+        ImGui_ImplVulkan_NewFrame();
+    } else
+#endif
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -267,6 +348,15 @@ void nw_ui_end(void)
 #ifdef NW_RHI_HAVE_D3D12
     if (nw_rhi_kind() == NW_RHI_D3D12) {
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), (ID3D12GraphicsCommandList *)nw_rhi_native(2));
+        return;
+    }
+#endif
+#ifdef NW_RHI_HAVE_VULKAN
+    if (nw_rhi_kind() == NW_RHI_VULKAN) {
+        VkCommandBuffer cmd = (VkCommandBuffer)nw_rhi_native(5);
+        if (cmd) {
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+        }
         return;
     }
 #endif

@@ -86,5 +86,8 @@ extern const NwRhiBackend nw_rhi_d3d11;
 #ifdef NW_RHI_HAVE_D3D12
 extern const NwRhiBackend nw_rhi_d3d12;
 #endif
+#ifdef NW_RHI_HAVE_VULKAN
+extern const NwRhiBackend nw_rhi_vulkan;
+#endif
 
 #endif

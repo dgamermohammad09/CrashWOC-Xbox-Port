@@ -29,6 +29,8 @@ cp "$BUILD/NuWorld.exe" "$PKG/NuWorld.exe"
 "$ROOT/tools/llvm-mingw/bin/llvm-strip" "$PKG/NuWorld.exe"
 "$VC/editbin.exe" -nologo -appcontainer "$(cygpath -w "$PKG/NuWorld.exe")"
 cp "$SDL_DLL" "$MESA/opengl32.dll" "$MESA/libgallium_wgl.dll" "$MESA/z-1.dll" "$DXIL" "$PKG/"
+# The Vulkan renderer's driver (Mesa Dozen, Vulkan on Direct3D 12), loaded with LoadPackagedLibrary.
+cp "$MESA/vulkan_dzn.dll" "$PKG/"
 cp "$HERE"/Assets/*.png "$PKG/Assets/"
 sed "s/@VERSION@/$VERSION/" "$HERE/AppxManifest.xml.in" > "$PKG/AppxManifest.xml"
 
