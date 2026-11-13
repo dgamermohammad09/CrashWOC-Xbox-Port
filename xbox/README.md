@@ -7,7 +7,7 @@ PC build, compiled for the Xbox's sandbox. There's no emulator.
 |---|---|
 | Game code (decomp + port) | Built with llvm-mingw (clang, UCRT), the same sources as the PC build, `NW_UWP` defined |
 | Window, input, controller | SDL3-uwp (XboxEmulationHub fork, CoreWindow, Windows.Gaming.Input) |
-| OpenGL renderer | Mesa 26.2.2 UWP build (`opengl32.dll` + `libgallium_wgl.dll`): OpenGL 4.6 on Direct3D 12 |
+| Renderer | Direct3D 11 by default (`src/gfx/rhi_d3d11.c`, swap chain on the CoreWindow, no OpenGL); `renderer = "opengl"` / `--renderer opengl` takes the Mesa 26.2.2 UWP build (`opengl32.dll` + `libgallium_wgl.dll`): OpenGL 4.6 on Direct3D 12. See [RENDERERS.md](RENDERERS.md) |
 | Sound | XAudio2 (`src/platform/audio.c`; SDL's WASAPI device cannot open in this app) |
 | Data folder | `LocalState\crashwoc-nuworld\` (settings, saves, log, imported disc) |
 
@@ -54,5 +54,7 @@ downloaded with the Device Portal file explorer.
 
 `xbox/run_pc.ps1 -Layout out\pkg -Data <folder with disc\>` registers the package (Windows Developer Mode) and runs it
 in the same AppContainer sandbox. `args.txt` in the data folder stands in for a command line (one argument per line).
-`env NAME=VALUE` lines set environment variables. A PC without Direct3D 12 hardware (VMs) needs
-`env LIBGL_ALWAYS_SOFTWARE=true` (Mesa on WARP).
+`env NAME=VALUE` lines set environment variables. With the OpenGL renderer, a PC without Direct3D 12 hardware (VMs)
+needs `env LIBGL_ALWAYS_SOFTWARE=true` (Mesa on WARP); the default Direct3D 11 renderer needs nothing.
+`env NW_WINDOW_SHOT=<png>` saves the game window's frame 30 s in (`NW_WINDOW_SHOT_MS`), `env NW_LAUNCHER_SHOT=<png>`
+the launcher's.
