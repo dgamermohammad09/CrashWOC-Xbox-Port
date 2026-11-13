@@ -60,6 +60,19 @@ void nw_debug_list_end(void);
 void nw_debug_heading(const char *text);
 bool nw_debug_selectable(const char *label, bool selected);
 
+/* The registered items, for the launcher (frontend/launcher.h) to lay out outside the overlay. */
+typedef enum NwDebugItemKind {
+    NW_DEBUG_ITEM_PANEL,
+    NW_DEBUG_ITEM_TOGGLE,
+    NW_DEBUG_ITEM_ACTION,
+} NwDebugItemKind;
+
+unsigned nw_debug_items(void);
+/* false past the last one. */
+bool nw_debug_item(unsigned i, NwDebugItemKind *kind, const char **menu, const char **label);
+/* A panel's contents, a toggle's checkbox or an action's button, in the current ImGui window. */
+void nw_debug_item_draw(unsigned i);
+
 #ifdef __cplusplus
 }
 #endif

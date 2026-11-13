@@ -5,6 +5,7 @@
 #include "imgui.h"
 
 #include "app.h"
+#include "frontend/launcher.h"
 #include "frontend/ui.h"
 
 extern "C" {
@@ -601,6 +602,7 @@ static void nw_wizard_failed(NwWizard *w)
 NwWizardResult nw_wizard_draw(NwWizard *w)
 {
     NwWizardResult result = NW_WIZARD_OPEN;
+    nw_launcher_backdrop();
     const ImGuiViewport *vp = ImGui::GetMainViewport();
     float scale = ImGui::GetStyle().FontScaleDpi;
     float margin = NW_WIZARD_MARGIN * scale;

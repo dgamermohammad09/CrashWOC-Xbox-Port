@@ -34,7 +34,8 @@ static ImVec4 nw_ui_rgb(unsigned rgb, float a = 1.0f)
     return ImVec4((float)(rgb >> 16 & 0xff) / 255.0f, (float)(rgb >> 8 & 0xff) / 255.0f, (float)(rgb & 0xff) / 255.0f, a);
 }
 
-/* Dark blue panels with an orange accent, sized for scale (the display's content scale). */
+/* The Wrath of Cortex's colours: Cortex's deep purple panels, Crash's orange, the yellow menu cursor; sized for scale
+   (the display's content scale). */
 static void nw_ui_style(float scale)
 {
     ImGuiStyle style;
@@ -50,27 +51,36 @@ static void nw_ui_style(float scale)
     style.SeparatorTextBorderSize = 2.0f;
 
     ImVec4 *c = style.Colors;
-    c[ImGuiCol_Text] = nw_ui_rgb(0xf2f4f8);
-    c[ImGuiCol_TextDisabled] = nw_ui_rgb(0x8d97ad);
-    c[ImGuiCol_WindowBg] = nw_ui_rgb(0x141c30);
-    c[ImGuiCol_ChildBg] = nw_ui_rgb(0x0d1324);
-    c[ImGuiCol_PopupBg] = nw_ui_rgb(0x141c30);
-    c[ImGuiCol_MenuBarBg] = nw_ui_rgb(0x141c30);
-    c[ImGuiCol_Border] = nw_ui_rgb(0x2c3858);
-    c[ImGuiCol_FrameBg] = nw_ui_rgb(0x0d1324);
-    c[ImGuiCol_FrameBgHovered] = nw_ui_rgb(0x1d2742);
-    c[ImGuiCol_FrameBgActive] = nw_ui_rgb(0x243052);
-    c[ImGuiCol_Button] = nw_ui_rgb(0xe8751a);
-    c[ImGuiCol_ButtonHovered] = nw_ui_rgb(0xf58d38);
-    c[ImGuiCol_ButtonActive] = nw_ui_rgb(0xc95f0e);
-    c[ImGuiCol_Header] = nw_ui_rgb(0x243052);
-    c[ImGuiCol_HeaderHovered] = nw_ui_rgb(0x2e3c66);
-    c[ImGuiCol_HeaderActive] = nw_ui_rgb(0x36477a);
-    c[ImGuiCol_Separator] = nw_ui_rgb(0x2c3858);
-    c[ImGuiCol_PlotHistogram] = nw_ui_rgb(0xe8751a);
-    c[ImGuiCol_ScrollbarBg] = nw_ui_rgb(0x0d1324);
+    c[ImGuiCol_Text] = nw_ui_rgb(0xfff4e0);
+    c[ImGuiCol_TextDisabled] = nw_ui_rgb(0xc0a6e0);
+    c[ImGuiCol_WindowBg] = nw_ui_rgb(0x170733, 0.94f);
+    c[ImGuiCol_ChildBg] = nw_ui_rgb(0x12052a);
+    c[ImGuiCol_PopupBg] = nw_ui_rgb(0x170733);
+    c[ImGuiCol_MenuBarBg] = nw_ui_rgb(0x2a0f4d);
+    c[ImGuiCol_Border] = nw_ui_rgb(0xff8a1c);
+    c[ImGuiCol_FrameBg] = nw_ui_rgb(0x30115a);
+    c[ImGuiCol_FrameBgHovered] = nw_ui_rgb(0x4a1a86);
+    c[ImGuiCol_FrameBgActive] = nw_ui_rgb(0x5e24a8);
+    c[ImGuiCol_Button] = nw_ui_rgb(0xff8a1c);
+    c[ImGuiCol_ButtonHovered] = nw_ui_rgb(0xffa640);
+    c[ImGuiCol_ButtonActive] = nw_ui_rgb(0xc9500a);
+    c[ImGuiCol_Header] = nw_ui_rgb(0x4a1a86);
+    c[ImGuiCol_HeaderHovered] = nw_ui_rgb(0x5e24a8);
+    c[ImGuiCol_HeaderActive] = nw_ui_rgb(0xc9500a);
+    c[ImGuiCol_Separator] = nw_ui_rgb(0xff8a1c, 0.6f);
+    c[ImGuiCol_CheckMark] = nw_ui_rgb(0xffd23f);
+    c[ImGuiCol_SliderGrab] = nw_ui_rgb(0xff8a1c);
+    c[ImGuiCol_SliderGrabActive] = nw_ui_rgb(0xffd23f);
+    c[ImGuiCol_TitleBg] = nw_ui_rgb(0x2a0f4d);
+    c[ImGuiCol_TitleBgActive] = nw_ui_rgb(0x4a1a86);
+    c[ImGuiCol_TableRowBgAlt] = nw_ui_rgb(0xffffff, 0.04f);
+    c[ImGuiCol_PlotHistogram] = nw_ui_rgb(0xff8a1c);
+    c[ImGuiCol_ScrollbarBg] = nw_ui_rgb(0x12052a);
+    c[ImGuiCol_ScrollbarGrab] = nw_ui_rgb(0xff8a1c, 0.8f);
     c[ImGuiCol_NavCursor] = nw_ui_rgb(0xffd23f);
-    c[ImGuiCol_TextLink] = nw_ui_rgb(0xffb35c);
+    c[ImGuiCol_TextLink] = nw_ui_rgb(0xffd23f);
+    style.WindowBorderSize = 3.0f;
+    style.FrameBorderSize = 0.0f;
 
     /* Over the running game: tight, translucent, orange only on what is set. */
     if (nw_ui_compact) {
@@ -87,16 +97,14 @@ static void nw_ui_style(float scale)
         style.GrabRounding = 3.0f;
         style.PopupRounding = 4.0f;
         style.SeparatorTextBorderSize = 1.0f;
-        c[ImGuiCol_WindowBg] = nw_ui_rgb(0x141c30, 0.94f);
-        c[ImGuiCol_TitleBg] = nw_ui_rgb(0x0d1324, 0.94f);
-        c[ImGuiCol_TitleBgActive] = nw_ui_rgb(0x1d2742);
-        c[ImGuiCol_TitleBgCollapsed] = nw_ui_rgb(0x0d1324, 0.75f);
-        c[ImGuiCol_Button] = nw_ui_rgb(0x243052);
-        c[ImGuiCol_ButtonHovered] = nw_ui_rgb(0x2e3c66);
-        c[ImGuiCol_ButtonActive] = nw_ui_rgb(0x36477a);
-        c[ImGuiCol_CheckMark] = nw_ui_rgb(0xe8751a);
-        c[ImGuiCol_SliderGrab] = nw_ui_rgb(0xe8751a);
-        c[ImGuiCol_SliderGrabActive] = nw_ui_rgb(0xf58d38);
+        style.WindowBorderSize = 2.0f;
+        c[ImGuiCol_WindowBg] = nw_ui_rgb(0x170733, 0.94f);
+        c[ImGuiCol_TitleBg] = nw_ui_rgb(0x2a0f4d, 0.94f);
+        c[ImGuiCol_TitleBgActive] = nw_ui_rgb(0xc9500a);
+        c[ImGuiCol_TitleBgCollapsed] = nw_ui_rgb(0x2a0f4d, 0.75f);
+        c[ImGuiCol_Button] = nw_ui_rgb(0x4a1a86);
+        c[ImGuiCol_ButtonHovered] = nw_ui_rgb(0x5e24a8);
+        c[ImGuiCol_ButtonActive] = nw_ui_rgb(0xc9500a);
     }
 
     style.FontSizeBase = nw_ui_compact ? NW_UI_COMPACT_FONT_SIZE : NW_UI_FONT_SIZE;

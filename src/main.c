@@ -11,6 +11,7 @@
 #include "app.h"
 #include "audio/nusound.h"
 #include "frontend/help.h"
+#include "frontend/launcher.h"
 #include "frontend/ui.h"
 #include "frontend/wizard.h"
 #include "gfx/rhi.h"
@@ -1025,6 +1026,30 @@ static void nw_boot_fatal(SDL_Window *window, const char *data_dir)
 
 /* Runs the game in the window; hardware_speed and aspect -1 take settings.toml's, which the debug menu changes and
    saves. window: the setup's open window to take over (it keeps the keyboard focus), NULL to open one. */
+/* The launcher (frontend/launcher.h) before the game; --no-launcher starts the game at once. */
+static bool nw_launcher_enabled = true;
+
+typedef struct NwLauncherApply {
+    NwSettings *settings;
+    NwSettings applied;
+} NwLauncherApply;
+
+/* What the game loop applies at once, applied on the launcher's page too: the window, the picture, the volume. */
+static void nw_launcher_tick(void *user, const SDL_Event *event)
+{
+    NwLauncherApply *a = user;
+    if (event) {
+        nw_video_event(event);
+        return;
+    }
+    if (!nw_settings_equal(a->settings, &a->applied)) {
+        nw_audio_set_buses(a->settings->master_volume, a->settings->voice_volume);
+        nw_input_set_controls(&a->settings->controls);
+        nw_video_apply(a->settings, &a->applied);
+        a->applied = *a->settings;
+    }
+}
+
 static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPlatform *window)
 {
     char *root = nw_data_root(data_dir);
@@ -1045,9 +1070,6 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
     if (aspect >= 0.0f) {
         settings.aspect = aspect;
     }
-    if (!nw_run_hz) {
-        nw_run_hz = settings.hz;
-    }
     char aspect_name[32];
     SDL_Log("settings: %d Hz, hardware speed %s, aspect %s, interpolation %s, movement %s, air indicator %s, "
             "boss health %s, camera stability %d%%",
@@ -1055,31 +1077,14 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
             nw_settings_aspect_name(settings.aspect, aspect_name, sizeof(aspect_name)),
             settings.interpolation ? "on" : "off", nw_movement_profiles[nw_movement_profile(&settings.movement)],
             settings.air_indicator ? "on" : "off", settings.boss_health ? "on" : "off", settings.camera_stability);
-    int code = nw_boot_prepare(data_dir, NW_CLOCK_REALTIME, settings.hardware_speed);
-    if (code) {
-        if (window) {
-            nw_platform_shutdown(window);
-        }
-        return code;
-    }
+    /* The window and the settings first: the launcher shows them before the game is prepared, so the speed (Hz) and
+       the hardware speed chosen there count from this start. */
     NwPlatform platform;
     if (window ? !nw_window_ready(window, data_dir) : !nw_window_open(&platform, data_dir)) {
         return 1;
     }
     if (window) {
         platform = *window;
-    }
-    if (nw_pad_script) {
-        SDL_Log(NW_APP_NAME ": --pad-script plays the retail game: no [game] switches");
-    } else {
-        nw_profile_apply(&(NwProfile){ .title_menu = !settings.retail_menu,
-                                       .movement = settings.movement,
-                                       .air_indicator = settings.air_indicator,
-                                       .boss_health = settings.boss_health,
-                                       .wombat = settings.wombat,
-                                       .hub_minigame = settings.hub_minigame,
-                                       .long_time_names = settings.long_time_names,
-                                       .camera_stability = settings.camera_stability });
     }
     nw_wide_set(nw_video_start(&platform, &settings), settings.hud);
     nw_debug_panel("Settings", "Audio", nw_boot_audio, &settings, false);
@@ -1094,14 +1099,6 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
     nw_debug_toggle("Gameplay", "Boss health", &settings.boss_health);
     nw_debug_toggle("Gameplay", "Loading minigame in the hub", &settings.hub_minigame);
     nw_debug_toggle("Gameplay", "Time trial names of up to 8 letters", &settings.long_time_names);
-    {
-        char *root = nw_data_root(data_dir);
-        char *saves = root ? nw_paths_dir(root, NW_PATHS_SAVES, false) : NULL;
-        nw_saveimport_start(platform.window, saves);
-        nw_saveexport_start(platform.window, saves, nw_shim_file_vfs());
-        SDL_free(saves);
-        SDL_free(root);
-    }
     nw_debug_panel_key("N. Hanced Movement", "Crash", SDL_SCANCODE_F2, nw_boot_movement, &settings);
     nw_debug_panel_key("N. Hanced Movement", "Coco", SDL_SCANCODE_F10, nw_boot_coco, &settings);
     nw_debug_panel_key("N. Hanced Movement", "Mech", SDL_SCANCODE_F3, nw_boot_mech, &settings);
@@ -1125,6 +1122,45 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
         char *root = nw_data_root(data_dir);
         nw_help_start(platform.window, root);
         SDL_free(root);
+    }
+    if (nw_launcher_enabled && !nw_pad_script && !nw_run_level) {
+        NwLauncherApply launch = { &settings, settings };
+        if (nw_launcher_run(platform.window, nw_build_name, nw_launcher_tick, &launch) == NW_LAUNCHER_QUIT) {
+            nw_boot_settings(data_dir, &settings, true);
+            nw_help_stop();
+            nw_window_close(&platform);
+            return 0;
+        }
+        nw_boot_settings(data_dir, &settings, true);
+    }
+    if (!nw_run_hz) {
+        nw_run_hz = settings.hz;
+    }
+    int code = nw_boot_prepare(data_dir, NW_CLOCK_REALTIME, settings.hardware_speed);
+    if (code) {
+        nw_help_stop();
+        nw_window_close(&platform);
+        return code;
+    }
+    {
+        char *root = nw_data_root(data_dir);
+        char *saves = root ? nw_paths_dir(root, NW_PATHS_SAVES, false) : NULL;
+        nw_saveimport_start(platform.window, saves);
+        nw_saveexport_start(platform.window, saves, nw_shim_file_vfs());
+        SDL_free(saves);
+        SDL_free(root);
+    }
+    if (nw_pad_script) {
+        SDL_Log(NW_APP_NAME ": --pad-script plays the retail game: no [game] switches");
+    } else {
+        nw_profile_apply(&(NwProfile){ .title_menu = !settings.retail_menu,
+                                       .movement = settings.movement,
+                                       .air_indicator = settings.air_indicator,
+                                       .boss_health = settings.boss_health,
+                                       .wombat = settings.wombat,
+                                       .hub_minigame = settings.hub_minigame,
+                                       .long_time_names = settings.long_time_names,
+                                       .camera_stability = settings.camera_stability });
     }
     NwSettings applied = settings;
     bool unsaved = false;
@@ -1656,6 +1692,10 @@ int main(int argc, char *argv[])
             export_slots = argv[++i];
         } else if (strcmp(argv[i], "--data-dir") == 0) {
             data_dir = argv[++i];
+#ifdef NW_WITH_GAME
+        } else if (strcmp(argv[i], "--no-launcher") == 0) {
+            nw_launcher_enabled = false;
+#endif
         } else if (strcmp(argv[i], "--verify") == 0) {
             verify = true;
         } else if (strcmp(argv[i], "--setup") == 0) {
