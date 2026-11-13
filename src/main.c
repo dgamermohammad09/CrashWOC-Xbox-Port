@@ -745,6 +745,33 @@ static void nw_window_close(NwPlatform *p)
 }
 
 /* The data folder's settings.toml read over s or written from it; a failure is reported and passed. */
+/* Test hook: NW_WINDOW_SHOT=<png> saves the game window's frame once, NW_WINDOW_SHOT_MS (default 30000) after the
+   first call, on any renderer (the UWP build cannot be screenshotted from outside). */
+static void nw_window_shot(SDL_Window *window)
+{
+    static Uint64 first;
+    static bool done;
+    const char *path = SDL_getenv("NW_WINDOW_SHOT");
+    if (done || !path || !*path) {
+        return;
+    }
+    const char *ms = SDL_getenv("NW_WINDOW_SHOT_MS");
+    Uint64 now = SDL_GetTicks();
+    if (!first) {
+        first = now;
+    }
+    if (now - first < (Uint64)(ms ? SDL_atoi(ms) : 30000)) {
+        return;
+    }
+    done = true;
+    int w, h;
+    SDL_GetWindowSizeInPixels(window, &w, &h);
+    SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ABGR8888);
+    bool ok = s && nw_rhi_window_read(w, h, s->pixels, s->pitch) && SDL_SavePNG(s, path);
+    SDL_Log("window shot %s (%s, %dx%d): %s", path, nw_rhi_kind_name(nw_rhi_kind()), w, h, ok ? "saved" : SDL_GetError());
+    SDL_DestroySurface(s);
+}
+
 static void nw_boot_settings(const char *data_dir, NwSettings *s, bool save)
 {
     char *root = nw_data_root(data_dir);
@@ -1249,6 +1276,7 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
         nw_display_size(platform.window, &width, &height);
         nw_backend_frame(width, height, settings.interpolation ? nw_game_edge_time() : -1.0);
         nw_debug_frame();
+        nw_window_shot(platform.window);
         nw_rhi_present();
     }
     nw_discord_stop();
