@@ -118,6 +118,7 @@ add_executable(crashwoc-nuworld
   src/gfx/vu.c
   src/frontend/debug.cpp
   src/frontend/help.c
+  src/frontend/launcher.cpp
   src/frontend/ui.cpp
   src/frontend/wizard.cpp)
 set_target_properties(crashwoc-nuworld PROPERTIES OUTPUT_NAME NuWorld)

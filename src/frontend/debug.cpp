@@ -203,6 +203,44 @@ bool nw_debug_selectable(const char *label, bool selected)
     return ImGui::Selectable(label, selected);
 }
 
+unsigned nw_debug_items(void)
+{
+    return nw_debug.nitems;
+}
+
+bool nw_debug_item(unsigned i, NwDebugItemKind *kind, const char **menu, const char **label)
+{
+    if (i >= nw_debug.nitems) {
+        return false;
+    }
+    const NwDebugItem *item = &nw_debug.items[i];
+    *kind = item->kind == NW_DEBUG_PANEL ? NW_DEBUG_ITEM_PANEL
+            : item->kind == NW_DEBUG_TOGGLE ? NW_DEBUG_ITEM_TOGGLE
+                                            : NW_DEBUG_ITEM_ACTION;
+    *menu = item->menu;
+    *label = item->label;
+    return true;
+}
+
+void nw_debug_item_draw(unsigned i)
+{
+    if (i >= nw_debug.nitems) {
+        return;
+    }
+    NwDebugItem *item = &nw_debug.items[i];
+    ImGui::PushID((int)i);
+    if (item->kind == NW_DEBUG_TOGGLE) {
+        ImGui::Checkbox(item->label, item->value);
+    } else if (item->kind == NW_DEBUG_ACTION) {
+        if (ImGui::Button(item->label)) {
+            item->fn(item->user);
+        }
+    } else {
+        item->fn(item->user);
+    }
+    ImGui::PopID();
+}
+
 /* menu is the path's first len characters or a submenu of it. */
 static bool nw_debug_under(const char *menu, const char *path, size_t len)
 {
