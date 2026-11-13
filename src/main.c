@@ -1794,7 +1794,7 @@ int main(int argc, char *argv[])
             renderer = argv[++i];
             NwRhiKind kind;
             if (!nw_rhi_kind_parse(renderer, &kind)) {
-                fprintf(stderr, NW_APP_NAME ": --renderer takes opengl or d3d11 (d3d12, vulkan: not yet)\n");
+                fprintf(stderr, NW_APP_NAME ": --renderer takes opengl, d3d11, d3d12 or vulkan\n");
                 return 2;
             }
             if (!nw_rhi_kind_available(kind)) {

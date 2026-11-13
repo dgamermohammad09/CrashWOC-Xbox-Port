@@ -83,5 +83,8 @@ extern const NwRhiBackend nw_rhi_gl;
 #ifdef NW_RHI_HAVE_D3D11
 extern const NwRhiBackend nw_rhi_d3d11;
 #endif
+#ifdef NW_RHI_HAVE_D3D12
+extern const NwRhiBackend nw_rhi_d3d12;
+#endif
 
 #endif

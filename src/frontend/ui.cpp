@@ -6,6 +6,11 @@
 #ifdef NW_RHI_HAVE_D3D11
 #include "imgui_impl_dx11.h"
 #endif
+#ifdef NW_RHI_HAVE_D3D12
+#include "imgui_impl_dx12.h"
+
+#include "gfx/rhi_d3d12.h"
+#endif
 
 #include "gfx/rhi.h"
 
@@ -20,6 +25,22 @@ static SDL_Window *nw_ui_window;
 static ImFont *nw_ui_fonts[2];
 static float nw_ui_scale;
 static bool nw_ui_compact;
+
+#ifdef NW_RHI_HAVE_D3D12
+/* Dear ImGui's textures take descriptors of the renderer's shader-visible heap. */
+static void nw_ui_dx12_alloc(ImGui_ImplDX12_InitInfo *, D3D12_CPU_DESCRIPTOR_HANDLE *cpu, D3D12_GPU_DESCRIPTOR_HANDLE *gpu)
+{
+    uint64_t c = 0, g = 0;
+    nw_rhi_d3d12_ui_alloc(&c, &g);
+    cpu->ptr = (SIZE_T)c;
+    gpu->ptr = g;
+}
+
+static void nw_ui_dx12_free(ImGui_ImplDX12_InitInfo *, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE gpu)
+{
+    nw_rhi_d3d12_ui_free(gpu.ptr);
+}
+#endif
 
 static ImFont *nw_ui_add_font(const unsigned char *data, size_t size, const char *name)
 {
@@ -150,6 +171,30 @@ bool nw_ui_init(NwPlatform *p, bool compact)
         return true;
     }
 #endif
+#ifdef NW_RHI_HAVE_D3D12
+    /* Direct3D 12: the renderer's device, queue and heap; it records into the renderer's command list. */
+    if (nw_rhi_kind() == NW_RHI_D3D12) {
+        if (!nw_ui_fonts[NW_UI_REGULAR] || !nw_ui_fonts[NW_UI_BOLD] || !ImGui_ImplSDL3_InitForD3D(p->window)) {
+            ImGui::DestroyContext();
+            return SDL_SetError("Dear ImGui could not start");
+        }
+        ImGui_ImplDX12_InitInfo info;
+        info.Device = (ID3D12Device *)nw_rhi_native(0);
+        info.CommandQueue = (ID3D12CommandQueue *)nw_rhi_native(1);
+        info.NumFramesInFlight = NW_RHI_D3D12_FRAMES + 1;
+        info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        info.DSVFormat = DXGI_FORMAT_UNKNOWN;
+        info.SrvDescriptorHeap = (ID3D12DescriptorHeap *)nw_rhi_native(3);
+        info.SrvDescriptorAllocFn = nw_ui_dx12_alloc;
+        info.SrvDescriptorFreeFn = nw_ui_dx12_free;
+        if (!ImGui_ImplDX12_Init(&info)) {
+            ImGui_ImplSDL3_Shutdown();
+            ImGui::DestroyContext();
+            return SDL_SetError("Dear ImGui could not start Direct3D 12");
+        }
+        return true;
+    }
+#endif
     if (!nw_ui_fonts[NW_UI_REGULAR] || !nw_ui_fonts[NW_UI_BOLD] || !ImGui_ImplSDL3_InitForOpenGL(p->window, p->gl)) {
         ImGui::DestroyContext();
         return SDL_SetError("Dear ImGui could not start");
@@ -167,6 +212,12 @@ void nw_ui_shutdown(void)
 #ifdef NW_RHI_HAVE_D3D11
     if (nw_rhi_kind() == NW_RHI_D3D11) {
         ImGui_ImplDX11_Shutdown();
+    } else
+#endif
+#ifdef NW_RHI_HAVE_D3D12
+    if (nw_rhi_kind() == NW_RHI_D3D12) {
+        nw_rhi_d3d12_idle(); /* its buffers may still be read */
+        ImGui_ImplDX12_Shutdown();
     } else
 #endif
     ImGui_ImplOpenGL3_Shutdown();
@@ -193,6 +244,11 @@ void nw_ui_begin(void)
         ImGui_ImplDX11_NewFrame();
     } else
 #endif
+#ifdef NW_RHI_HAVE_D3D12
+    if (nw_rhi_kind() == NW_RHI_D3D12) {
+        ImGui_ImplDX12_NewFrame();
+    } else
+#endif
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -205,6 +261,12 @@ void nw_ui_end(void)
 #ifdef NW_RHI_HAVE_D3D11
     if (nw_rhi_kind() == NW_RHI_D3D11) {
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
+#endif
+#ifdef NW_RHI_HAVE_D3D12
+    if (nw_rhi_kind() == NW_RHI_D3D12) {
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), (ID3D12GraphicsCommandList *)nw_rhi_native(2));
         return;
     }
 #endif

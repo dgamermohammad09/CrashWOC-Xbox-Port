@@ -259,7 +259,7 @@ static const NwSettingKey nw_settings_keys[] = {
       .names = nw_settings_filters, .help = "textures: retail (the PS2's, per texture), nearest or bilinear" },
     { .table = "video", .name = "renderer", .kind = NW_SETTING_ENUM, NW_FIELD(renderer), .hi = NW_RENDERERS,
       .names = nw_settings_renderers,
-      .help = "auto (OpenGL on a PC, Direct3D 11 on Xbox), opengl or d3d11 (d3d12, vulkan: planned); next start" },
+      .help = "auto (OpenGL on a PC, Direct3D 11 on Xbox), opengl, d3d11, d3d12 or vulkan; next start" },
     { .table = "video", .name = "gems", .kind = NW_SETTING_BOOL, NW_FIELD(gems),
       .help = "true draws gems, crystals and relics as cut stone and polished metal; false as the PS2" },
     { .table = "video", .name = "draw_distance", .kind = NW_SETTING_INT, NW_FIELD(draw_distance), .lo = 100,

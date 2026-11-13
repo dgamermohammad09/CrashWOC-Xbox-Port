@@ -1,0 +1,21 @@
+# The Direct3D 12 renderer (src/gfx/rhi_d3d12.c, xbox/RENDERERS.md). It takes the Direct3D 11 renderer's shader model
+# 5.0 bytecode (cmake/d3d11.cmake, build/gen/d3d11_shaders.c), which Direct3D 12 accepts as is, so it needs that one.
+if(NOT WIN32)
+  return()
+endif()
+if(NOT NUWORLD_D3D11)
+  message(STATUS "Direct3D 12 renderer: off (it takes the Direct3D 11 renderer's shaders)")
+  return()
+endif()
+option(NUWORLD_D3D12 "The Direct3D 12 renderer (needs NUWORLD_D3D11's shaders)" ON)
+if(NOT NUWORLD_D3D12)
+  message(STATUS "Direct3D 12 renderer: off")
+  return()
+endif()
+target_sources(crashwoc-nuworld PRIVATE src/gfx/rhi_d3d12.c)
+target_compile_definitions(crashwoc-nuworld PRIVATE NW_RHI_HAVE_D3D12)
+target_link_libraries(crashwoc-nuworld PRIVATE d3d12 dxgi dxguid)
+# Dear ImGui's Direct3D 12 backend (it compiles its two small shaders with d3dcompiler_47 at start, as the dx11 one).
+target_sources(nuworld_imgui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp)
+target_link_libraries(nuworld_imgui PUBLIC d3d12 dxgi d3dcompiler)
+message(STATUS "Direct3D 12 renderer: on")

@@ -1,5 +1,6 @@
 /* The renderer's GPU interface (render hardware interface): exactly what src/gfx/backend.c, src/gfx/vu.c and the
-   frontend's Dear ImGui need, over OpenGL 3.3 (rhi_gl.c) or Direct3D 11 (rhi_d3d11.c). Render thread only.
+   frontend's Dear ImGui need, over OpenGL 3.3 (rhi_gl.c), Direct3D 11 (rhi_d3d11.c), Direct3D 12 (rhi_d3d12.c) or
+   Vulkan (rhi_vk.c). Render thread only.
 
    Conventions, all backends (see xbox/RENDERERS.md):
    - Coordinates are OpenGL's: a texture's row 0 is the bottom of what is drawn into it (clip-space y -1), viewport,
@@ -27,8 +28,8 @@ extern "C" {
 typedef enum NwRhiKind {
     NW_RHI_OPENGL,
     NW_RHI_D3D11,
-    NW_RHI_D3D12,  /* reserved: not implemented yet */
-    NW_RHI_VULKAN, /* reserved: not implemented yet */
+    NW_RHI_D3D12,
+    NW_RHI_VULKAN,
     NW_RHI_KINDS
 } NwRhiKind;
 
@@ -51,7 +52,8 @@ SDL_WindowFlags nw_rhi_prepare_window(void);
 /* The device (and GL context) on the window; false with an SDL error. */
 bool nw_rhi_init(SDL_Window *window);
 void nw_rhi_shutdown(void);
-/* The backend's native handles for Dear ImGui: GL the SDL_GLContext; D3D11 the ID3D11Device and context. */
+/* The backend's native handles for Dear ImGui: GL the SDL_GLContext; D3D11 the ID3D11Device and context; D3D12 see
+   rhi_d3d12.h, Vulkan rhi_vk.h. */
 void *nw_rhi_native(int which);
 /* "OpenGL 4.6 (renderer, vendor)" or "Direct3D 11 (adapter)". */
 const char *nw_rhi_description(void);
