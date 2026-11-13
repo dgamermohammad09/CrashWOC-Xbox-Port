@@ -30,6 +30,7 @@
     V(generate_mips, (NwRhiTexture * t), (t))                                                                        \
     X(texture_read, bool, (NwRhiTexture * t, int x, int y, int width, int height, void *rgba, int pitch),           \
       (t, x, y, width, height, rgba, pitch))                                                                         \
+    X(window_read, bool, (int width, int height, void *rgba, int pitch), (width, height, rgba, pitch))               \
     X(program_create, NwRhiProgram *, (const NwRhiProgramDesc *d), (d))                                              \
     V(program_destroy, (NwRhiProgram * p), (p))                                                                      \
     X(uniform, int, (NwRhiProgram * p, const char *name), (p, name))                                                 \

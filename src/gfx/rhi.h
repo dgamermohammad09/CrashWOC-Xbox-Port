@@ -117,6 +117,8 @@ uint64_t nw_rhi_texture_ui(NwRhiTexture *t);
 void nw_rhi_generate_mips(NwRhiTexture *t);
 /* RGBA8 rows of a colour target, from row y up: out row i is texture row y + i. False with an SDL error. */
 bool nw_rhi_texture_read(NwRhiTexture *t, int x, int y, int width, int height, void *rgba, int pitch);
+/* The window's frame drawn so far (before nw_rhi_present), RGBA8 of its pixel size, top row first (screenshots). */
+bool nw_rhi_window_read(int width, int height, void *rgba, int pitch);
 
 /* ---- programs ---- */
 

@@ -353,6 +353,17 @@ static bool nw_gl_texture_read(NwRhiTexture *t, int x, int y, int width, int hei
     return true;
 }
 
+static bool nw_gl_window_read(int width, int height, void *rgba, int pitch)
+{
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    for (int i = 0; i < height; i++) { /* GL's rows count from the bottom */
+        glReadPixels(0, height - 1 - i, width, 1, GL_RGBA, GL_UNSIGNED_BYTE, (uint8_t *)rgba + (size_t)i * (size_t)pitch);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, nw_gl.target ? nw_gl.target->fbo : 0);
+    return true;
+}
+
 /* ---- programs ---- */
 
 static GLuint nw_gl_shader(GLenum type, const NwRhiProgramDesc *d, const char *src, size_t size)

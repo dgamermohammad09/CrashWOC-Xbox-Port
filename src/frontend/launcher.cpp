@@ -9,7 +9,6 @@
 
 extern "C" {
 #include "frontend/debug.h"
-#include "gfx/gl.h"
 #include "gfx/rhi.h"
 }
 
@@ -283,26 +282,13 @@ static void nw_launcher_page(const NwLauncherMenu *m)
 static void nw_launcher_shot(SDL_Window *window, const char *path)
 {
     int w, h;
-    if (nw_rhi_kind() != NW_RHI_OPENGL) {
-        SDL_Log("launcher: shot %s: only with the OpenGL renderer", path);
-        return;
-    }
     SDL_GetWindowSizeInPixels(window, &w, &h);
     SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ABGR8888);
     if (!s) {
         return;
     }
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
-    /* bottom-up to top-down */
-    Uint8 *row = (Uint8 *)SDL_malloc((size_t)s->pitch);
-    for (int y = 0; row && y < h / 2; y++) {
-        Uint8 *a = (Uint8 *)s->pixels + (size_t)y * s->pitch, *b = (Uint8 *)s->pixels + (size_t)(h - 1 - y) * s->pitch;
-        SDL_memcpy(row, a, (size_t)s->pitch);
-        SDL_memcpy(a, b, (size_t)s->pitch);
-        SDL_memcpy(b, row, (size_t)s->pitch);
-    }
-    SDL_free(row);
-    SDL_Log("launcher: shot %s: %s", path, SDL_SavePNG(s, path) ? "saved" : SDL_GetError());
+    bool ok = nw_rhi_window_read(w, h, s->pixels, s->pitch) && SDL_SavePNG(s, path);
+    SDL_Log("launcher: shot %s (%s): %s", path, nw_rhi_kind_name(nw_rhi_kind()), ok ? "saved" : SDL_GetError());
     SDL_DestroySurface(s);
 }
 

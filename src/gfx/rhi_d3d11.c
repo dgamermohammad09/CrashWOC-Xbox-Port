@@ -183,7 +183,7 @@ static bool nw_d3d_swap_chain(void)
         if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &ad))) {
             char *name = SDL_iconv_string("UTF-8", "UTF-16LE", (const char *)ad.Description,
                                           (SDL_wcslen((const wchar_t *)ad.Description) + 1) * sizeof(WCHAR));
-            SDL_snprintf(nw_d3d.description, sizeof(nw_d3d.description), "Direct3D 11 (feature level %x_%x), %s",
+            SDL_snprintf(nw_d3d.description, sizeof(nw_d3d.description), "Direct3D 11 (feature level %u_%u), %s",
                          (unsigned)nw_d3d.level >> 12, ((unsigned)nw_d3d.level >> 8) & 0xF, name ? name : "?");
             SDL_free(name);
         }
@@ -568,7 +568,7 @@ static void nw_d3d_generate_mips(NwRhiTexture *t)
     }
 }
 
-static bool nw_d3d_texture_read(NwRhiTexture *t, int x, int y, int width, int height, void *rgba, int pitch)
+static bool nw_d3d_read(ID3D11Resource *src, int x, int y, int width, int height, void *rgba, int pitch)
 {
     D3D11_TEXTURE2D_DESC td = { 0 };
     td.Width = (UINT)width;
@@ -585,8 +585,7 @@ static bool nw_d3d_texture_read(NwRhiTexture *t, int x, int y, int width, int he
         return nw_d3d_fail("a staging texture", hr);
     }
     D3D11_BOX box = { (UINT)x, (UINT)y, 0, (UINT)(x + width), (UINT)(y + height), 1 };
-    ID3D11DeviceContext_CopySubresourceRegion(nw_d3d.ctx, (ID3D11Resource *)staging, 0, 0, 0, 0,
-                                              (ID3D11Resource *)t->tex, 0, &box);
+    ID3D11DeviceContext_CopySubresourceRegion(nw_d3d.ctx, (ID3D11Resource *)staging, 0, 0, 0, 0, src, 0, &box);
     D3D11_MAPPED_SUBRESOURCE map;
     hr = ID3D11DeviceContext_Map(nw_d3d.ctx, (ID3D11Resource *)staging, 0, D3D11_MAP_READ, 0, &map);
     if (SUCCEEDED(hr)) {
@@ -598,6 +597,24 @@ static bool nw_d3d_texture_read(NwRhiTexture *t, int x, int y, int width, int he
     }
     ID3D11Texture2D_Release(staging);
     return SUCCEEDED(hr) || nw_d3d_fail("Map", hr);
+}
+
+static bool nw_d3d_texture_read(NwRhiTexture *t, int x, int y, int width, int height, void *rgba, int pitch)
+{
+    return nw_d3d_read((ID3D11Resource *)t->tex, x, y, width, height, rgba, pitch);
+}
+
+/* The swap chain's rows are the window's from the top (only textures keep GL's rows). */
+static bool nw_d3d_window_read(int width, int height, void *rgba, int pitch)
+{
+    ID3D11Resource *r = NULL;
+    if (!nw_d3d.back) {
+        return SDL_SetError("Direct3D 11: no window buffer");
+    }
+    ID3D11RenderTargetView_GetResource(nw_d3d.back, &r);
+    bool ok = nw_d3d_read(r, 0, 0, SDL_min(width, nw_d3d.back_w), SDL_min(height, nw_d3d.back_h), rgba, pitch);
+    IUnknown_Release(r);
+    return ok;
 }
 
 /* ---- programs ---- */
