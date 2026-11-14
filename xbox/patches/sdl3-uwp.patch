@@ -241,3 +241,47 @@ index 0e2c7eb..8b181b5 100644
  
      thread = SDL_CreateThread(picker_kicker, "SDL_WinRT_BasicPicker", (void *)args);
      SDL_DetachThread(thread);
+diff --git a/src/filesystem/SDL_filesystem.c b/src/filesystem/SDL_filesystem.c
+index 81c0b41..982fec6 100644
+--- a/src/filesystem/SDL_filesystem.c
++++ b/src/filesystem/SDL_filesystem.c
+@@ -100,9 +100,14 @@ bool SDL_CreateDirectory(const char *path)
+                     *ptr = '\0';
+                     // (this does not fail if the path already exists as a directory.)
+                     retval = SDL_SYS_CreateDirectory(parents);
++                    #ifndef SDL_PLATFORM_WINRT
+                     if (!retval) {  // still failing when making parents? Give up.
+                         break;
+                     }
++                    #endif
++                    /* NuWorld (Xbox port): in the UWP sandbox the ancestors outside the app's own folders
++                       (C:\Users, ...) can be neither created nor inspected, so keep going; the last
++                       call below decides. */
+                     *ptr = ch;
+                 }
+             }
+diff --git a/src/filesystem/windows/SDL_sysfsops.c b/src/filesystem/windows/SDL_sysfsops.c
+index f0fc0fd..019f6be 100644
+--- a/src/filesystem/windows/SDL_sysfsops.c
++++ b/src/filesystem/windows/SDL_sysfsops.c
+@@ -183,13 +183,19 @@ bool SDL_SYS_CreateDirectory(const char *path)
+     }
+ 
+     DWORD rc = CreateDirectoryW(wpath, NULL);
+-    if (!rc && (GetLastError() == ERROR_ALREADY_EXISTS)) {
++    /* NuWorld (Xbox port): in an AppContainer, CreateDirectoryW on an existing folder the app may not write
++       (C:\Users, ...) fails with ACCESS_DENIED, not ALREADY_EXISTS, which broke creating missing parents. */
++    DWORD err = rc ? 0 : GetLastError();
++    if (!rc && (err == ERROR_ALREADY_EXISTS || err == ERROR_ACCESS_DENIED)) {
+         WIN32_FILE_ATTRIBUTE_DATA winstat;
+         if (GetFileAttributesExW(wpath, GetFileExInfoStandard, &winstat)) {
+             if (winstat.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                 rc = 1;  // exists and is already a directory: cool.
+             }
+         }
++        if (!rc) {
++            SetLastError(err);
++        }
+     }
+ 
+     SDL_free(wpath);

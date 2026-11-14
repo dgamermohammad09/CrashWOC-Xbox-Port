@@ -1641,7 +1641,10 @@ static void nw_uwp_args(int *argc, char ***argv)
     if (pref && SDL_asprintf(&file, "%sstdout.txt", pref) >= 0) {
         if (freopen(file, "w", stdout)) {
             setvbuf(stdout, NULL, _IONBF, 0);
-            _dup2(_fileno(stdout), _fileno(stderr));
+            /* a GUI process has no stderr descriptor to _dup2 onto: open the same file for it, appending */
+            if (_fileno(stderr) < 0 || _dup2(_fileno(stdout), _fileno(stderr)) != 0) {
+                freopen(file, "a", stderr);
+            }
             setvbuf(stderr, NULL, _IONBF, 0);
         }
         SDL_free(file);
