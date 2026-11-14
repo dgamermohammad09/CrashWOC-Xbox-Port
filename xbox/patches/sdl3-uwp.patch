@@ -1,3 +1,16 @@
+diff --git a/include/build_config/SDL_build_config_winrt.h b/include/build_config/SDL_build_config_winrt.h
+index c2171df..b27f835 100644
+--- a/include/build_config/SDL_build_config_winrt.h
++++ b/include/build_config/SDL_build_config_winrt.h
+@@ -161,7 +161,7 @@
+ #define SDL_JOYSTICK_DISABLED 1
+ #define SDL_HAPTIC_DISABLED 1
+ #else
+-//#define SDL_JOYSTICK_VIRTUAL    1
++#define SDL_JOYSTICK_VIRTUAL    1 /* NuWorld: the test pad (NW_TEST_PAD) */
+ #if (NTDDI_VERSION >= NTDDI_WIN10)
+ #define SDL_JOYSTICK_WGI    1
+ #define SDL_HAPTIC_DISABLED 1
 diff --git a/src/dialog/winrt/SDL_winrt_pickers.cpp b/src/dialog/winrt/SDL_winrt_pickers.cpp
 index 6e84fa1..6975e94 100644
 --- a/src/dialog/winrt/SDL_winrt_pickers.cpp

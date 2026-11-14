@@ -13,6 +13,7 @@
 #include "frontend/gameart.h"
 #include "frontend/help.h"
 #include "frontend/launcher.h"
+#include "platform/testpad.h"
 #include "frontend/ui.h"
 #include "frontend/wizard.h"
 #include "gfx/rhi.h"
@@ -1313,6 +1314,7 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
         nw_backend_frame(width, height, settings.interpolation ? nw_game_edge_time() : -1.0);
         nw_debug_frame();
         nw_window_shot(platform.window);
+        nw_testpad_frame(platform.window);
         nw_rhi_present();
     }
     nw_discord_stop();
@@ -1641,6 +1643,7 @@ static int nw_setup(const char *data_dir, int max_frames, NwPlatform *window)
         }
         nw_ui_end();
         nw_window_shot(platform.window);
+        nw_testpad_frame(platform.window);
         nw_rhi_present();
 
         if (max_frames > 0 && ++frames >= max_frames) {

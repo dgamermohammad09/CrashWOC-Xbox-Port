@@ -402,7 +402,7 @@ void nw_art_shutdown(void)
 bool nw_art_button(const char *label, ImVec2 size, int kind)
 {
     ImVec2 p = ImGui::GetCursorScreenPos();
-    bool pressed = ImGui::InvisibleButton(label, size);
+    bool pressed = ImGui::InvisibleButton(label, size, ImGuiButtonFlags_EnableNav); /* reachable with the pad */
     bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused(), held = ImGui::IsItemActive();
     float alpha = ImGui::GetStyle().Alpha;
     ImDrawList *dl = ImGui::GetWindowDrawList();

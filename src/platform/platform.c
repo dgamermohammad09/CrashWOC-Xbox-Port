@@ -1,4 +1,5 @@
 #include "platform/platform.h"
+#include "platform/testpad.h"
 
 #include "app.h"
 #include "gfx/rhi.h"
@@ -43,6 +44,7 @@ bool nw_platform_init(NwPlatform *p, const char *title, int width, int height)
         nw_platform_fail("SDL could not start");
         return false;
     }
+    nw_testpad_start();
 
     /* The renderer's window: OpenGL's needs SDL_WINDOW_OPENGL and its context attributes, Direct3D's nothing. */
     SDL_WindowFlags api = nw_rhi_prepare_window();

@@ -54,6 +54,8 @@ struct NwWizard {
     int shot_w, shot_h;
     bool zoom; /* the screenshot fills the window */
     bool focus; /* focus the page's main button next frame */
+    NwWizardPage drawn; /* the page this frame started with */
+    bool drawn_copying;
 #ifdef NW_UWP
     char **usb; /* disc images on removable drives (Xbox): full paths */
     size_t nusb;
@@ -452,8 +454,11 @@ static int nw_wizard_buttons(const char *const *labels, const int *kinds, int co
 
 static void nw_wizard_focus_here(NwWizard *w)
 {
-    if (w->focus) {
-        ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); /* focused, not pressed */
+    /* not in the frame that switched pages: that would focus the old page's button, which is gone next frame and
+       leaves the pad nothing to move from */
+    if (w->focus && w->drawn == w->page && w->drawn_copying == w->copying) {
+        /* focused, not pressed; the nav window of a NavFlattened child is its parent, or the pad cannot move on */
+        ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()->RootWindowForNav);
         ImGui::SetNavCursorVisible(nw_art_pad_used());
         w->focus = false;
     }
@@ -780,6 +785,25 @@ static void nw_wizard_header(float W, float H, ImVec2 o, float top)
 NwWizardResult nw_wizard_draw(NwWizard *w)
 {
     NwWizardResult result = NW_WIZARD_OPEN;
+    if (w->drawn != w->page || w->drawn_copying != w->copying) {
+        w->focus = true; /* every page starts on its main button */
+    }
+    w->drawn = w->page;
+    w->drawn_copying = w->copying;
+    {
+        /* a pad press with nothing focused (the focused item went away): back to the page's main button */
+        ImGuiContext &g = *ImGui::GetCurrentContext();
+        static const ImGuiKey keys[] = { ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadDpadLeft,
+                                         ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickUp, ImGuiKey_GamepadLStickDown,
+                                         ImGuiKey_GamepadFaceDown };
+        bool pressed = false;
+        for (ImGuiKey k : keys) {
+            pressed = pressed || ImGui::IsKeyPressed(k, false);
+        }
+        if (pressed && (!g.NavWindow || !g.NavId)) {
+            w->focus = true;
+        }
+    }
     const ImGuiViewport *vp = ImGui::GetMainViewport();
     float W = vp->Size.x, H = vp->Size.y, s = nw_wizard_s(), t = (float)ImGui::GetTime();
     ImVec2 o = vp->Pos;

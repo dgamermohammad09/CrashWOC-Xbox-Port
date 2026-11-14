@@ -171,7 +171,7 @@ static NwRow nw_row(const char *label, const char *hint)
     float fs = ImGui::GetFontSize(), w = ImGui::GetContentRegionAvail().x, h = fs * 2.0f;
     r.a = ImGui::GetCursorScreenPos();
     r.b = ImVec2(r.a.x + w, r.a.y + h);
-    r.pressed = ImGui::InvisibleButton(label, ImVec2(w, h));
+    r.pressed = ImGui::InvisibleButton(label, ImVec2(w, h), ImGuiButtonFlags_EnableNav);
     if (!nw_rows.first) {
         nw_rows.first = ImGui::GetItemID();
     }

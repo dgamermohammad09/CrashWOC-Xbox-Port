@@ -12,6 +12,7 @@
 extern "C" {
 #include "frontend/debug.h"
 #include "gfx/rhi.h"
+#include "platform/testpad.h"
 }
 
 #define NW_LAUNCHER_MENUS 16
@@ -595,6 +596,7 @@ NwLauncherResult nw_launcher_run(SDL_Window *window, const char *version, NwLaun
                 result = SDL_strcmp(shot_exit, "play") == 0 ? NW_LAUNCHER_PLAY : NW_LAUNCHER_QUIT;
             }
         }
+        nw_testpad_frame(window);
         nw_rhi_present();
     }
     nw_gameart_audio_close();

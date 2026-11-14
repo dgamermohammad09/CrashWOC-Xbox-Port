@@ -114,6 +114,7 @@ add_executable(crashwoc-nuworld
   src/platform/display.c
   src/platform/log.c
   src/platform/platform.c
+  src/platform/testpad.c
   src/gfx/gl.c
   src/gfx/rhi.c
   src/gfx/rhi_gl.c
