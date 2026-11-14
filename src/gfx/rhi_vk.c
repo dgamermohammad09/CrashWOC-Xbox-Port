@@ -40,6 +40,11 @@
 #define DXGI_SWAP_EFFECT_FLIP_DISCARD ((DXGI_SWAP_EFFECT)4)
 #endif
 
+#ifdef NW_UWP
+/* kernel32's, declared for the app partition only (this build does not set WINAPI_FAMILY) */
+WINBASEAPI HMODULE WINAPI LoadPackagedLibrary(LPCWSTR name, DWORD reserved);
+#endif
+
 #define NW_VK_FRAMES 2
 #define NW_VK_IMAGES 8                  /* swap chain images at most */
 #define NW_VK_LAYOUTS 16                /* distinct vertex layouts */

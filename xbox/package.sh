@@ -13,6 +13,11 @@ VC=$(ls -d "/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSV
 SDL_DLL="$ROOT/deps/sdl3-uwp-out/SDL3-UWP/SDL3.dll"
 MESA="$ROOT/deps/mesa-uwp/bin"
 DXIL="/c/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/dxil.dll"
+# The Vulkan renderer's Dozen crashes in the Windows SDK's validator (1.6, 2021): take DirectXShaderCompiler's newer
+# dxil.dll (1.9, from the mesa-dist-win release in tools/mesa-dzn) when it is there; Mesa's OpenGL takes it too.
+if [ -f "$ROOT/tools/mesa-dzn/dxil.dll" ]; then
+  DXIL="$ROOT/tools/mesa-dzn/dxil.dll"
+fi
 VCLIBS="/c/Program Files (x86)/Microsoft SDKs/Windows Kits/10/ExtensionSDKs/Microsoft.VCLibs/14.0/Appx/Retail/x64/Microsoft.VCLibs.x64.14.00.appx"
 
 # The version only goes up: 0.8.<day of the year 2026 on>.<minute of the day>
