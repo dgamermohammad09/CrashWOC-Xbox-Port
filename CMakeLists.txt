@@ -119,6 +119,7 @@ add_executable(crashwoc-nuworld
   src/gfx/rhi_gl.c
   src/gfx/vu.c
   src/frontend/debug.cpp
+  src/frontend/gameart.c
   src/frontend/help.c
   src/frontend/launcher.cpp
   src/frontend/ui.cpp

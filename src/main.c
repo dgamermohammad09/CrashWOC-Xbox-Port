@@ -10,6 +10,7 @@
 
 #include "app.h"
 #include "audio/nusound.h"
+#include "frontend/gameart.h"
 #include "frontend/help.h"
 #include "frontend/launcher.h"
 #include "frontend/ui.h"
@@ -1686,6 +1687,7 @@ int main(int argc, char *argv[])
     int hardware_speed = -1; /* --hardware-speed on|off; -1: as the mode has it */
     const char *aspect_arg = NULL; /* --aspect auto|W:H|ratio */
     const char *renderer = NULL;   /* --renderer opengl|d3d11, else settings.toml's [video] renderer */
+    const char *dump_art = NULL;   /* --dump-art <dir>: the launcher's game art as PNGs (src/frontend/gameart.c) */
 
     nw_log_init(argc, argv);
     for (int i = 1; i < argc; i++) {
@@ -1733,6 +1735,8 @@ int main(int argc, char *argv[])
             check_data = true;
         } else if (strcmp(argv[i], "--check-scenes") == 0) {
             check_scenes = true;
+        } else if (strcmp(argv[i], "--dump-art") == 0 && i + 1 < argc) {
+            dump_art = argv[++i];
         } else if (strcmp(argv[i], "--check-disc") == 0) {
             check_disc = true;
         } else if (strcmp(argv[i], "--scene") == 0) {
@@ -1840,6 +1844,12 @@ int main(int argc, char *argv[])
         nw_rhi_select(settings.renderer ? (NwRhiKind)(settings.renderer - 1) : nw_rhi_kind_default());
     }
 #endif
+    if (dump_art) {
+        char *root = nw_data_root(data_dir);
+        int code = nw_gameart_dump(root, dump_art);
+        SDL_free(root);
+        return code;
+    }
     /* Without a mode the game starts; the first start (no imported disc) and --setup ask for the disc first. */
     NwPlatform window = { 0 }; /* the setup's window, which the game takes over */
     if (!(check_data || check_scenes || check_disc || scene || scene_check || boot_check || capture || dump)) {

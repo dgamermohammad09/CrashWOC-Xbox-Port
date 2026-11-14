@@ -210,6 +210,21 @@ void nw_audio_set_buses(int master, int voice)
     }
 }
 
+/* A sound outside the SPU: the launcher's menu sounds (frontend/gameart.c), before the game runs. It cuts off what
+   was still queued. */
+void nw_audio_play(const float *frames, unsigned count)
+{
+    if (!nw_audio.lock) {
+        return;
+    }
+    SDL_LockMutex(nw_audio.lock);
+    if (nw_audio.stream) {
+        SDL_ClearAudioStream(nw_audio.stream);
+        SDL_PutAudioStreamData(nw_audio.stream, frames, (int)(count * NW_AUDIO_FRAME));
+    }
+    SDL_UnlockMutex(nw_audio.lock);
+}
+
 /* The game thread may still run: the output stays set and goes nowhere. */
 void nw_audio_close(void)
 {
