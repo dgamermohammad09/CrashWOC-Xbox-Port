@@ -307,9 +307,30 @@ static void nw_input_prompts(void)
     nw_font3d_prompts(&p);
 }
 
+static bool nw_input_hold;
+
+void nw_input_hold_until_release(void)
+{
+    nw_input_hold = true;
+    NwPadInput neutral = { 0, 0x80, 0x80, 0x80, 0x80, 0, 0 };
+    nw_pad_set(&neutral);
+}
+
 void nw_input_poll(bool keyboard)
 {
     NwPadInput in = { 0, 0x80, 0x80, 0x80, 0x80, 0, 0 };
+    if (nw_input_hold) {
+        NwPadInput held = in;
+        if (nw_input_pad) {
+            nw_input_gamepad(nw_input_pad, &nw_input_controls, &held);
+        }
+        if (held.buttons || held.l2 || held.r2 || nw_input_stick_used(held.lx) || nw_input_stick_used(held.ly) ||
+            nw_input_stick_used(held.rx) || nw_input_stick_used(held.ry)) {
+            nw_pad_set(&in);
+            return;
+        }
+        nw_input_hold = false;
+    }
     bool naming = nw_nameentry_wanted();
     nw_input_text(naming && keyboard);
     nw_input_keyboard_on = keyboard;

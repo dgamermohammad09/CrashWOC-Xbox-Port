@@ -1222,12 +1222,41 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
     uint64_t presented = 0;
     NwPacer pacer = { 0 };
     bool running = true;
+    /* View + Menu together in the game: the launcher's settings page over it (the Xbox has no F1). The Menu
+       press reaches the game first, so it is in its own pause menu; the page opens a few frames later. */
+    int settings_page_in = 0;
+    /* test hook: NW_INGAME_SETTINGS_MS=<ms> opens it once as View + Menu would */
+    const char *settings_page_test = SDL_getenv("NW_INGAME_SETTINGS_MS");
+    uint64_t settings_page_test_at = settings_page_test ? SDL_GetTicks() + (uint64_t)SDL_atoi(settings_page_test) : 0;
     while (running) {
         nw_pacer_wait(&pacer, nw_video_fps(&settings));
+        if (settings_page_test_at && SDL_GetTicks() >= settings_page_test_at) {
+            settings_page_test_at = 0;
+            settings_page_in = 1;
+        }
+        if (settings_page_in > 0 && --settings_page_in == 0 && !nw_pad_script && !nw_run_level) {
+            nw_input_hold_until_release();
+            NwLauncherApply page = { &settings, settings };
+            NwLauncherResult r = nw_launcher_run(platform.window, nw_build_name, nw_launcher_tick, &page);
+            nw_input_hold_until_release();
+            nw_boot_settings(data_dir, &settings, true);
+            if (r == NW_LAUNCHER_QUIT) {
+                running = false;
+            }
+        }
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (!nw_debug_event(&event) && event.type == SDL_EVENT_QUIT) {
                 running = false;
+            }
+            if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && !settings_page_in) {
+                SDL_Gamepad *gp = SDL_GetGamepadFromID(event.gbutton.which);
+                if (gp && ((event.gbutton.button == SDL_GAMEPAD_BUTTON_START &&
+                            SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK)) ||
+                           (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK &&
+                            SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_START)))) {
+                    settings_page_in = 8;
+                }
             }
             nw_input_event(&event);
             nw_video_event(&event);

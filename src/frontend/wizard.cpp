@@ -650,62 +650,54 @@ static void nw_wizard_done(NwWizard *w)
     nw_wizard_focus_here(w);
 }
 
-/* Uploads the embedded screenshot once; the page goes on without it if that fails. */
-static void nw_wizard_load_shot(NwWizard *w)
-{
-    SDL_IOStream *io = SDL_IOFromConstMem(nw_beta_menu_png, nw_beta_menu_png_size);
-    SDL_Surface *png = io ? SDL_LoadPNG_IO(io, true) : NULL;
-    SDL_Surface *rgba = png ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
-    SDL_DestroySurface(png);
-    if (!rgba || rgba->pitch != rgba->w * 4) {
-        SDL_Log("wizard: screenshot: %s", SDL_GetError());
-        SDL_DestroySurface(rgba);
-        return;
-    }
-    const void *level = rgba->pixels;
-    w->shot = nw_rhi_texture_create(NW_RHI_RGBA8, rgba->w, rgba->h, 1, 1, NW_RHI_TEX_LINEAR, &level);
-    w->shot_w = rgba->w;
-    w->shot_h = rgba->h;
-    SDL_DestroySurface(rgba);
-}
-
 static NwWizardResult nw_wizard_welcome(NwWizard *w)
 {
     float fs = ImGui::GetFontSize();
     nw_wizard_h1("Welcome to the NuWorld beta");
     nw_wizard_muted("Thanks for testing! This beta has one goal: fine-tuning N. Hanced Movement, NuWorld's reworked "
                     "movement for Crash, Coco and the vehicles.");
-    if (!w->shot && w->shot_w >= 0) {
-        nw_wizard_load_shot(w);
-        if (!w->shot) {
-            w->shot_w = -1; /* failed, do not retry every frame */
+    nw_wizard_section("Your settings");
+    nw_wizard_muted("Every start opens the launcher first: video and renderer, sound, controls, gameplay, "
+                    "N. Hanced Movement for Crash, Coco and each vehicle (Retail = the original movement), and debug. "
+                    "Changes are kept for the next start.");
+    ImGui::Dummy(ImVec2(1, fs * 0.35f));
+    {
+        /* the launcher's controls, as icons: the device last used decides (always the controller on Xbox) */
+        bool pad = nw_art_pad_used();
+        struct Row {
+            NwArtPrompt icons[2];
+            int count;
+            const char *text;
+        };
+        static const Row pad_rows[] = {
+            { { { "xbox_dpad_up", NULL, "" }, { "xbox_dpad_down", NULL, "" } }, 2, "Move between options" },
+            { { { "xbox_dpad_left", NULL, "" }, { "xbox_dpad_right", NULL, "" } }, 2, "Change the value" },
+            { { { "xbox_lb", NULL, "" }, { "xbox_rb", NULL, "" } }, 2, "Previous / next page" },
+            { { { "xbox_button_color_a", NULL, "" }, { "xbox_button_color_b", NULL, "" } }, 2, "Choose / back" },
+            { { { "xbox_button_menu", NULL, "" } }, 1, "Start the game" },
+            { { { "xbox_button_view", NULL, "" }, { "xbox_button_menu", NULL, "" } }, 2,
+              "Settings in the game" },
+        };
+        static const Row key_rows[] = {
+            { { { NULL, "keyboard_arrow_up", "" }, { NULL, "keyboard_arrow_down", "" } }, 2, "Move between options" },
+            { { { NULL, "keyboard_arrow_left", "" }, { NULL, "keyboard_arrow_right", "" } }, 2, "Change the value" },
+            { { { NULL, "keyboard_q", "" }, { NULL, "keyboard_e", "" } }, 2, "Previous / next page" },
+            { { { NULL, "keyboard_enter", "" }, { NULL, "keyboard_escape", "" } }, 2, "Choose / back" },
+            { { { NULL, "keyboard_f1", "" } }, 1, "Settings in the game" },
+        };
+        const Row *rows = pad ? pad_rows : key_rows;
+        int n = pad ? (int)SDL_arraysize(pad_rows) : (int)SDL_arraysize(key_rows);
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        float h = fs * 1.55f, col = ImGui::GetContentRegionAvail().x * 0.5f, icons = h * 3.4f;
+        ImVec2 o = ImGui::GetCursorScreenPos();
+        int per = (n + 1) / 2;
+        for (int i = 0; i < n; i++) {
+            ImVec2 p(o.x + (float)(i / per) * col, o.y + (float)(i % per) * (h + fs * 0.45f));
+            nw_art_prompts(dl, p, h, rows[i].icons, rows[i].count, pad, false);
+            dl->AddText(ImVec2(p.x + icons, p.y + (h - fs) * 0.5f), nw_c(0xe8e4f4), rows[i].text);
         }
+        ImGui::Dummy(ImVec2(col * 2.0f, (float)per * (h + fs * 0.45f)));
     }
-    nw_wizard_section("Settings and the debug menu");
-    float avail = ImGui::GetContentRegionAvail().x;
-    if (w->shot) {
-        float width = avail * 0.34f, height = width * (float)w->shot_h / (float)w->shot_w;
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        ImGui::Image((ImTextureID)nw_rhi_texture_ui(w->shot), ImVec2(width, height));
-        ImGui::GetWindowDrawList()->AddRect(p, ImVec2(p.x + width, p.y + height), nw_c(0x3a4580), 4.0f, 1.5f);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-        }
-        if (ImGui::IsItemClicked()) {
-            w->zoom = true;
-        }
-        ImGui::SameLine(0.0f, fs * 1.2f);
-    }
-    ImGui::BeginGroup();
-    ImGui::PushTextWrapPos(0.0f);
-    nw_wizard_status(0, "Before the game starts, the launcher has every setting: video, audio, controls, game speed, "
-                        "camera, and N. Hanced Movement's parameters.");
-    nw_wizard_status(0, "In the game, F1 opens the same settings over it. Under N. Hanced Movement each of Crash, Coco "
-                        "and the vehicles has its own page and key.");
-    nw_wizard_status(0, "Retail and N. Hanced at the top of a page switch between the original movement and the beta's "
-                        "defaults. Changes are saved at once.");
-    ImGui::PopTextWrapPos();
-    ImGui::EndGroup();
     nw_wizard_section("Feedback");
     nw_wizard_muted("Something not working, or a parameter you would like? Create an issue on GitHub with the Beta "
                     "Feedback template, or start a thread on the Discord server.");

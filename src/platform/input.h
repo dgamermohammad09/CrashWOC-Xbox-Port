@@ -11,6 +11,9 @@
 void nw_input_event(const SDL_Event *event);
 /* Samples the gamepad and, unless keyboard is false, the keyboard, and hands both to the pad. */
 void nw_input_poll(bool keyboard);
+/* The game gets no input (neutral pad) until every button, trigger and stick of the controller is released:
+   after a page drawn over the game, so the buttons pressed there do not reach it. */
+void nw_input_hold_until_release(void);
 void nw_input_shutdown(void);
 
 typedef enum NwInputListen {
