@@ -294,8 +294,10 @@ static NwWizardResult nw_wizard_pick(NwWizard *w)
 
     nw_wizard_title("Welcome");
     ImGui::TextWrapped("NuWorld needs a disc image of your own copy of the game:");
-    ImGui::BulletText("Crash Bandicoot: The Wrath of Cortex for PS2: PAL v1.03 (SLES-50386) or USA v1.00 (SLUS-20238)");
-    ImGui::BulletText(".iso, or .bin with its .cue");
+    ImGui::Bullet();
+    ImGui::TextWrapped("Crash Bandicoot: The Wrath of Cortex for PS2: PAL v1.03 (SLES-50386) or USA v1.00 (SLUS-20238)");
+    ImGui::Bullet();
+    ImGui::TextWrapped(".iso, or .bin with its .cue");
 
     if (w->had_disc) {
         nw_wizard_wrapped(nw_wizard_ok, "A disc is already imported. It is only replaced if the new import works.");
