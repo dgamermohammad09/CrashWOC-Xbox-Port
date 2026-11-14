@@ -1,0 +1,243 @@
+diff --git a/src/dialog/winrt/SDL_winrt_pickers.cpp b/src/dialog/winrt/SDL_winrt_pickers.cpp
+index 6e84fa1..6975e94 100644
+--- a/src/dialog/winrt/SDL_winrt_pickers.cpp
++++ b/src/dialog/winrt/SDL_winrt_pickers.cpp
+@@ -1,15 +1,13 @@
+ #include <winrt/Windows.ApplicationModel.Core.h>
+ #include <winrt/Windows.Foundation.h>
+ #include <winrt/Windows.Foundation.Collections.h>
+-#include <winrt/Windows.Gaming.Input.h>
+-#include <winrt/Windows.Graphics.Display.Core.h>
+ #include <winrt/Windows.Storage.h>
+ #include <winrt/Windows.Storage.AccessCache.h>
+ #include <winrt/Windows.Storage.Pickers.h>
+-#include <winrt/Windows.Storage.Pickers.Provider.h>
+-#include <winrt/Windows.UI.Composition.h>
+ #include <winrt/Windows.UI.Core.h>
+-#include <winrt/Windows.UI.ViewManagement.h>
++
++#include <string>
++#include <vector>
+ 
+ #include <windows.h>
+ #include "SDL3/SDL.h"
+@@ -17,58 +15,165 @@
+ using namespace winrt::Windows;
+ using namespace winrt::Windows::ApplicationModel::Core;
+ using namespace winrt::Windows::Foundation;
+-using namespace winrt::Windows::Graphics::Display::Core;
+ using namespace Storage;
+-using namespace Storage::AccessCache;
+-using namespace winrt::Windows::UI::Core;
+-using namespace winrt::Windows::UI::ViewManagement;
+ 
+ // todo: how to best share this between c/c++?
+ typedef void (__cdecl *SDL_DialogFileCallback)(void *userdata, const char * const *filelist, int filter);
+-// todo: move to shared space between c & /zw 
++// todo: move to shared space between c & /zw
+ typedef struct
+ {
+     SDL_DialogFileCallback callback;
+     void *userdata;
++    int type;       /* SDL_FileDialogType: 0 open file, 1 save file, 2 open folder */
++    bool many;
+ } pickerArgs;
+ 
+-// impl for PickerThread referenced from winrtdialog
+-// note: this is very minimal and only supports single file picks, a good area to build out if you're bored one day
+-extern "C" int PickerThread(void* ptr)
++/* NuWorld (Xbox port) addition. A UWP app may read what the user picks only through the picked StorageFile, not by
++   its path, so with the hint SDL_WINRT_PICKER_COPY_TO set to a folder the picked files are copied there and the
++   copies' paths are returned; for a folder pick, every file in it whose extension is listed in
++   SDL_WINRT_PICKER_EXTENSIONS (".iso;.cue;.bin") is copied and the destination folder is returned. Without the hint
++   the picked paths are returned as before. */
++static std::vector<std::wstring> SDLUWP_Extensions()
+ {
+-    bool complete = false;
+-    pickerArgs* args = (pickerArgs *)ptr;
+-
+-    auto dispatcher = winrt::Windows::ApplicationModel::Core::CoreApplication::MainView().CoreWindow().Dispatcher();
+-
+-    dispatcher.RunAsync(winrt::Windows::UI::Core::CoreDispatcherPriority::Normal, [args, &complete]() mutable {
+-        Pickers::FileOpenPicker picker;
+-        picker.SuggestedStartLocation(Pickers::PickerLocationId::ComputerFolder);
+-        picker.FileTypeFilter().Append(L"*");
++    std::vector<std::wstring> exts;
++    const char *hint = SDL_GetHint("SDL_WINRT_PICKER_EXTENSIONS");
++    std::string list = hint ? hint : "";
++    size_t start = 0;
++    while (start <= list.size()) {
++        size_t end = list.find(';', start);
++        std::string e = list.substr(start, end == std::string::npos ? std::string::npos : end - start);
++        if (!e.empty()) {
++            if (e[0] != '.') {
++                e = "." + e;
++            }
++            exts.push_back(winrt::to_hstring(e).c_str());
++        }
++        if (end == std::string::npos) {
++            break;
++        }
++        start = end + 1;
++    }
++    return exts;
++}
+ 
+-        auto op = picker.PickSingleFileAsync();
++static bool SDLUWP_HasExtension(const std::wstring &name, const std::vector<std::wstring> &exts)
++{
++    for (const std::wstring &e : exts) {
++        if (name.size() >= e.size() && _wcsicmp(name.c_str() + name.size() - e.size(), e.c_str()) == 0) {
++            return true;
++        }
++    }
++    return false;
++}
+ 
+-        op.Completed([args, &complete](auto &&asyncInfo, auto status) mutable {
+-            if (status == winrt::Windows::Foundation::AsyncStatus::Completed) {
+-                auto file = asyncInfo.GetResults();
+-                if (file) {
+-                    std::string path = winrt::to_string(file.Path());
++// impl for PickerThread referenced from winrtdialog
++extern "C" int PickerThread(void *ptr)
++{
++    pickerArgs *args = (pickerArgs *)ptr;
++    volatile LONG complete = 0;
++    std::vector<StorageFile> files;
++    StorageFolder folder{ nullptr };
++    std::vector<std::wstring> exts = SDLUWP_Extensions();
+ 
+-                    const char *files[] = { path.c_str(), nullptr };
++    try {
++        winrt::init_apartment(winrt::apartment_type::multi_threaded);
++    } catch (...) {
++    }
+ 
+-                    args->callback(args->userdata, files, -1);
+-                    complete = true;
+-                    return;
++    auto dispatcher = CoreApplication::MainView().CoreWindow().Dispatcher();
++    dispatcher.RunAsync(UI::Core::CoreDispatcherPriority::Normal, [&]() {
++        try {
++            if (args->type == 2) {
++                Pickers::FolderPicker picker;
++                picker.SuggestedStartLocation(Pickers::PickerLocationId::ComputerFolder);
++                picker.FileTypeFilter().Append(L"*");
++                picker.PickSingleFolderAsync().Completed([&](auto &&op, auto status) {
++                    if (status == AsyncStatus::Completed) {
++                        folder = op.GetResults();
++                    }
++                    InterlockedExchange(&complete, 1);
++                });
++            } else {
++                Pickers::FileOpenPicker picker;
++                picker.SuggestedStartLocation(Pickers::PickerLocationId::ComputerFolder);
++                if (exts.empty()) {
++                    picker.FileTypeFilter().Append(L"*");
++                } else {
++                    for (const std::wstring &e : exts) {
++                        picker.FileTypeFilter().Append(e);
++                    }
++                }
++                if (args->many) {
++                    picker.PickMultipleFilesAsync().Completed([&](auto &&op, auto status) {
++                        if (status == AsyncStatus::Completed) {
++                            for (auto f : op.GetResults()) {
++                                files.push_back(f);
++                            }
++                        }
++                        InterlockedExchange(&complete, 1);
++                    });
++                } else {
++                    picker.PickSingleFileAsync().Completed([&](auto &&op, auto status) {
++                        if (status == AsyncStatus::Completed && op.GetResults()) {
++                            files.push_back(op.GetResults());
++                        }
++                        InterlockedExchange(&complete, 1);
++                    });
+                 }
+             }
+-            args->callback(args->userdata, NULL, -1);
+-            complete = true;
+-        });
++        } catch (...) {
++            InterlockedExchange(&complete, 1);
++        }
+     });
++    while (!InterlockedCompareExchange(&complete, 0, 0)) {
++        Sleep(50);
++    }
+ 
+-    while (!complete) {
+-        Sleep(100);
++    const char *copy_to = SDL_GetHint("SDL_WINRT_PICKER_COPY_TO");
++    std::vector<std::string> paths;
++    try {
++        if (folder && args->type == 2) {
++            if (copy_to && *copy_to) {
++                StorageFolder dest = StorageFolder::GetFolderFromPathAsync(winrt::to_hstring(copy_to)).get();
++                for (auto f : folder.GetFilesAsync().get()) {
++                    if (exts.empty() || SDLUWP_HasExtension(f.Name().c_str(), exts)) {
++                        f.CopyAsync(dest, f.Name(), NameCollisionOption::ReplaceExisting).get();
++                    }
++                }
++                paths.push_back(copy_to);
++            } else {
++                paths.push_back(winrt::to_string(folder.Path()));
++            }
++        } else if (!files.empty()) {
++            StorageFolder dest{ nullptr };
++            if (copy_to && *copy_to) {
++                dest = StorageFolder::GetFolderFromPathAsync(winrt::to_hstring(copy_to)).get();
++            }
++            for (auto f : files) {
++                if (dest) {
++                    StorageFile copy = f.CopyAsync(dest, f.Name(), NameCollisionOption::ReplaceExisting).get();
++                    paths.push_back(winrt::to_string(copy.Path()));
++                } else {
++                    paths.push_back(winrt::to_string(f.Path()));
++                }
++            }
++        }
++    } catch (winrt::hresult_error const &e) {
++        SDL_SetError("picker: %s", winrt::to_string(e.message()).c_str());
++        args->callback(args->userdata, NULL, -1);
++        return 0;
++    } catch (...) {
++        SDL_SetError("picker: copy failed");
++        args->callback(args->userdata, NULL, -1);
++        return 0;
+     }
+ 
++    std::vector<const char *> list;
++    for (const std::string &p : paths) {
++        list.push_back(p.c_str());
++    }
++    list.push_back(nullptr);
++    /* an empty list = cancelled */
++    args->callback(args->userdata, list.data(), -1);
+     return 0;
+ }
+diff --git a/src/dialog/winrt/SDL_winrtdialog.c b/src/dialog/winrt/SDL_winrtdialog.c
+index 0e2c7eb..8b181b5 100644
+--- a/src/dialog/winrt/SDL_winrtdialog.c
++++ b/src/dialog/winrt/SDL_winrtdialog.c
+@@ -28,6 +28,8 @@ typedef struct
+ {
+     SDL_DialogFileCallback callback;
+     void *userdata;
++    int type;  /* SDL_FileDialogType */
++    bool many;
+ } pickerArgs;
+ 
+ // To be implemented inside /ZW cpp file
+@@ -54,6 +56,8 @@ void SDL_SYS_ShowFileDialogWithProperties(SDL_FileDialogType type, SDL_DialogFil
+ 
+     args->callback = callback;
+     args->userdata = userdata;
++    args->type = (int)type;
++    args->many = SDL_GetBooleanProperty(props, SDL_PROP_FILE_DIALOG_MANY_BOOLEAN, false);
+ 
+     thread = SDL_CreateThread(picker_kicker, "SDL_WinRT_BasicPicker", (void *)args);
+     SDL_DetachThread(thread);
