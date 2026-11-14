@@ -7,9 +7,18 @@ PC build, compiled for the Xbox's sandbox. There's no emulator.
 |---|---|
 | Game code (decomp + port) | Built with llvm-mingw (clang, UCRT), the same sources as the PC build, `NW_UWP` defined |
 | Window, input, controller | SDL3-uwp (XboxEmulationHub fork, CoreWindow, Windows.Gaming.Input) |
-| Renderer | Direct3D 11 by default (`src/gfx/rhi_d3d11.c`, swap chain on the CoreWindow, no OpenGL); `renderer = "opengl"` / `--renderer opengl` takes the Mesa 26.2.2 UWP build (`opengl32.dll` + `libgallium_wgl.dll`): OpenGL 4.6 on Direct3D 12. See [RENDERERS.md](RENDERERS.md) |
+| Renderer | Direct3D 11 by default (`src/gfx/rhi_d3d11.c`, swap chain on the CoreWindow, no OpenGL); also Direct3D 12, OpenGL (Mesa) and Vulkan (Mesa Dozen, experimental), `renderer = "..."` / `--renderer ...` (table below, [RENDERERS.md](RENDERERS.md)) |
 | Sound | XAudio2 (`src/platform/audio.c`; SDL's WASAPI device cannot open in this app) |
 | Data folder | `LocalState\crashwoc-nuworld\` (settings, saves, log, imported disc) |
+
+### Renderers
+
+| Renderer (`renderer =`) | How it runs on Xbox | Verified (PC; this VM has no Direct3D 12 GPU) | Gaps |
+|---|---|---|---|
+| `d3d11` (default) | native Direct3D 11, CoreWindow swap chain | desktop: bit-exact vs OpenGL; UWP: title menu | not on real Xbox yet |
+| `d3d12` | native Direct3D 12, CoreWindow swap chain (WARP when no D3D12 GPU) | desktop (WARP): bit-exact vs D3D11 WARP, title + in level; UWP (WARP): title menu | never on a GPU / Xbox yet |
+| `opengl` | Mesa 26.2.2 UWP `opengl32.dll`: OpenGL 4.6 on Direct3D 12 | desktop: the reference; UWP (WARP): title menu | slower than native |
+| `vulkan` | Mesa Dozen `vulkan_dzn.dll` (Vulkan on Direct3D 12), offscreen, each frame copied through the CPU into a Direct3D 11 swap chain | desktop (Dozen on WARP): matches D3D12 to 0.003 mean, title + in level; UWP (WARP): title menu | **experimental**, slowest: a GPU wait + CPU copy per frame; not on Xbox yet |
 
 ## Build (Windows)
 
@@ -22,6 +31,8 @@ SDL3-uwp, `editbin`, `makeappx`, `signtool`), and the workspace layout:
   deps/     sdl3-uwp (git clone -b uwp-3.4.20 https://github.com/XboxEmulationHub/SDL3-uwp)
             sdl3-uwp-out/SDL3-UWP/ (its build)  mesa-uwp/bin/ (XboxEmulationHub/mesa-uwp release 26.2.2)
   tools/    llvm-mingw/  py/ (cmake, ninja, libclang)  env.sh  build_sdl3uwp.bat  check_uwp_imports.py
+            glslang/ spirv-cross/ (shaders)  vulkan-headers/ (KhronosGroup/Vulkan-Headers)
+            mesa-dzn/ (vulkan_dzn.dll + dxil.dll from pal1000/mesa-dist-win 26.2.6 release-msvc, x64)
 ```
 
 ```
@@ -55,6 +66,7 @@ downloaded with the Device Portal file explorer.
 `xbox/run_pc.ps1 -Layout out\pkg -Data <folder with disc\>` registers the package (Windows Developer Mode) and runs it
 in the same AppContainer sandbox. `args.txt` in the data folder stands in for a command line (one argument per line).
 `env NAME=VALUE` lines set environment variables. With the OpenGL renderer, a PC without Direct3D 12 hardware (VMs)
-needs `env LIBGL_ALWAYS_SOFTWARE=true` (Mesa on WARP); the default Direct3D 11 renderer needs nothing.
+needs `env LIBGL_ALWAYS_SOFTWARE=true` and `env GALLIUM_DRIVER=d3d12` (Mesa on WARP); Direct3D 11 needs nothing,
+Direct3D 12 and Vulkan (Dozen) switch to WARP by themselves (logged).
 `env NW_WINDOW_SHOT=<png>` saves the game window's frame 30 s in (`NW_WINDOW_SHOT_MS`), `env NW_LAUNCHER_SHOT=<png>`
 the launcher's.
