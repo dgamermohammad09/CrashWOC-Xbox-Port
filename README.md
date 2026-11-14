@@ -1,118 +1,113 @@
-<p align="center">
-  <img src="assets/branding/nuworld-icon.svg" width="144" alt="NuWorld">
-</p>
+# CrashWOC: NuWorld — Xbox Port Beta
 
-<h1 align="center">CrashWOC: NuWorld</h1>
+**Crash Bandicoot: The Wrath of Cortex running natively on Xbox One / Xbox Series X|S (Developer Mode).**
+Xbox port by **Mohammad Aljafari**, based on [NuWorld](https://github.com/denzi-gh/crashwoc-nuworld) by denzi-gh.
 
-<p align="center">
-  A native PC port of <i>Crash Bandicoot: The Wrath of Cortex</i> (PS2)
-</p>
+This is **not an emulator**. NuWorld runs the game's own code, rebuilt from the
+[decompilation](https://github.com/denzi-gh/crashwoc-decomp-ps2), and this port compiles that code as a native x64
+UWP app for the Xbox. It contains **no game data**: you need your own copy of the game, PAL v1.03 (SLES-50386) or
+USA v1.00 (SLUS-20238), as `.iso` or `.bin` + `.cue`.
 
-<p align="center">
-  <a href="#download">Download</a> ·
-  <a href="#first-startup">First startup</a> ·
-  <a href="#settings">Settings</a> ·
-  <a href="#building">Building</a> ·
-  <a href="https://discord.gg/kmCPpW4KvJ">Discord</a> ·
-  <a href="https://github.com/denzi-gh/crashwoc-decomp-ps2">Decompilation</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/denzi-gh/crashwoc-nuworld/releases/latest"><img src="https://img.shields.io/github/v/release/denzi-gh/crashwoc-nuworld?label=release" alt="release"></a>
-  <a href="https://github.com/denzi-gh/crashwoc-nuworld/actions/workflows/build.yml"><img src="https://github.com/denzi-gh/crashwoc-nuworld/actions/workflows/build.yml/badge.svg" alt="build"></a>
-  <a href="https://decomp.dev/denzi-gh/crashwoc-decomp-ps2"><img src="https://decomp.dev/denzi-gh/crashwoc-decomp-ps2.svg?mode=shield&label=decompiled" alt="decompiled"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational" alt="platform">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/denzi-gh/crashwoc-nuworld" alt="license"></a>
-  <a href="https://discord.gg/kmCPpW4KvJ"><img src="https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white" alt="discord"></a>
-</p>
-
----
-
-NuWorld is not an emulator or a static recomp. It runs the game's own code, rebuilt from the
-[decompilation](https://github.com/denzi-gh/crashwoc-decomp-ps2), natively on PC. It contains no game data: you
-need your own copy of the game, PAL v1.03 (SLES-50386) or USA v1.00 (SLUS-20238).
-
-> [!NOTE]
-> This is the **movement beta**. The whole game runs from start to end, but the Beta aims to find the right controls for the future release.
-> Pull requests are open to collaborators only for now.
-
-## Features
-
-- N. Hanced Movement for Crash, Coco and every vehicle, tunable in the game, or the original movement
-- 50 or 60 Hz, any aspect ratio, frame interpolation, draw distance up to 400 %
-- Window, fullscreen and borderless, resolution scale, MSAA, enhanced gems and relics
-- Remappable gamepad and keyboard, rumble, button prompts
-- Autosave next to 100 manual slots, readable saves, import from and export to PCSX2 memory cards
-- Air indicator, boss health, camera stability, longer time trial names, the loading minigame in the hub
-
-## Download
-
-Get the latest build from [Releases](https://github.com/denzi-gh/crashwoc-nuworld/releases/latest).
-
-| Platform | Package | Start |
-|---|---|---|
-| Windows (x64) | `CrashWOC-NuWorld-v…-windows-x64.zip` | `NuWorld.exe` |
-| Linux (x86_64) | `CrashWOC-NuWorld-v…-linux-x86_64.tar.gz` | `./NuWorld` |
-
-- Windows: the exe is not signed, so Windows may warn about an unrecognised app: *More info*, then *Run anyway*.
-- Linux: needs glibc 2.35 or newer (Ubuntu 22.04 or later) and OpenGL 3.3.
-
-## First startup
-
-On the first start NuWorld asks for your disc image (`.iso`, or `.bin`/`.cue`), checks it and imports it. After that
-the game starts right away.
-
-### Data folder
-
-Settings (`settings.toml`), saves, screenshots and the log (`nuworld.log`) are kept in
+> **Beta.** Built and tested in the Xbox app sandbox on PC. Please report what works and what doesn't on your
+> console (see [Reporting a problem](#reporting-a-problem)).
 
 | | |
 |---|---|
-| Windows | `%APPDATA%\crashwoc-nuworld\` |
-| Linux | `~/.local/share/crashwoc-nuworld/` (`$XDG_DATA_HOME`) |
+| ![Title screen](docs/images/title.jpg) | ![Gameplay](docs/images/gameplay.jpg) |
+| The game's title screen | In the game |
+| ![Launcher](docs/images/launcher.jpg) | ![Launcher settings](docs/images/launcher-settings.jpg) |
+| The launcher: every setting before the game starts | Settings pages (video, sound, controls, gameplay, N. Hanced Movement, debug) |
+| ![First-time setup](docs/images/setup.jpg) | ![Settings in the game](docs/images/ingame-settings.jpg) |
+| First start: choose your disc image | View + Menu in the game: the settings again |
 
-## Settings
+## Features
 
-| Key | |
-|---|---|
-| F1 | Menu: settings, gameplay, saves, N. Hanced Movement, help |
-| F2 | Crash's movement (F3 to F10: Coco and the vehicles) |
-| F11 | Fullscreen |
-| F12 | Screenshot |
+- Native Xbox app: the game's code compiled for the console, no emulation.
+- Four renderers: **Direct3D 11** (default), Direct3D 12, OpenGL (Mesa on D3D12) and Vulkan (Mesa Dozen,
+  experimental). Choose in the launcher's Video page.
+- A launcher in the game's own style (its logo, font, crates, Wumpa fruit and menu sounds, read from your disc) with
+  every setting and debug option, before the game starts.
+- Full controller support, rumble, Xbox button prompts.
+- Autosave plus 100 manual save slots, 50/60 Hz, any aspect ratio, frame interpolation, draw distance, MSAA,
+  N. Hanced Movement for Crash, Coco and every vehicle (or the original movement), and the other NuWorld features.
 
-Changes are saved to `settings.toml`.
+## Install on your Xbox
 
-> [!NOTE]
-> The settings menu is a debug menu. Proper in-game settings screens come with v1.0.
+You need an Xbox in **Developer Mode** (the Dev Mode Activation app from the Microsoft Store and a developer account),
+and a PC on the same network.
 
-## Feedback
+1. **Download** the latest release from the [Releases](../../releases/latest) page:
+   - `NuWorld_<version>_x64.msix`
+   - `Microsoft.VCLibs.x64.14.00.appx` (dependency)
+2. On the Xbox, start **Dev Home**, turn on **Remote Access** and note the Device Portal address
+   (`https://<xbox-ip>:11443`).
+3. On the PC, open that address in a browser (accept the certificate warning) and sign in.
+4. **Home → Add**. Choose the `.msix`, press **Next**, add `Microsoft.VCLibs.x64.14.00.appx` as a dependency, then
+   **Start**. Wait for "Package successfully registered".
+5. In Dev Home, highlight **CrashWOC: NuWorld (Xbox Port Beta)**, press **View** (the two squares) → **View details**
+   → **App type: Game**. (Games get more memory and the full GPU.)
+6. Start the app.
 
-Found a bug, or something about the movement feels wrong? Open an issue with one of the
-[forms](https://github.com/denzi-gh/crashwoc-nuworld/issues/new/choose) (Beta Feedback, Bug report, Crash / freeze, ...).
-In the game, F1 > Help opens them and copies your system info for the report. Updates are posted on
-[Discord](https://discord.gg/kmCPpW4KvJ).
+## First start: add your disc
 
-## Building
+The app starts on a setup page that asks for your disc image (`.iso`, or `.bin` + `.cue`). Use any of these:
 
-Needs Clang, CMake 3.25+, Ninja and Python 3.11+. On Windows,
-use an MSYS2 CLANG64 shell. On Linux, SDL3 is built from source and needs the X11, Wayland and audio development
-packages that the `linux` job of [build.yml](.github/workflows/build.yml) installs.
+- **Choose disc image…** opens the Xbox file picker. Pick the `.iso`, or the `.cue` **and** its `.bin` together.
+- **Choose folder…** picks a folder that holds the image.
+- **USB drive**: put the image at the root of a USB drive or in a `NuWorld` folder on it; it shows up in the list
+  under *On a USB drive*. NTFS drives must allow apps to read them once, from a PC:
+  `icacls X:\ /grant "*S-1-15-2-1:(OI)(CI)RX"` (X = the drive letter).
+- **Device Portal**: File explorer → LocalAppData → NuWorld.CrashWOC_… → LocalState → crashwoc-nuworld → import,
+  upload the image, then press **Import** in the list.
 
-```sh
-git clone --recursive https://github.com/denzi-gh/crashwoc-nuworld.git
-cd crashwoc-nuworld
-cmake --preset release
-cmake --build --preset release
+The image is copied, checked and imported once (about 500 MB, a minute or two). Then the launcher opens; press
+**Menu** to play.
+
+## Controls
+
+| Button | Launcher / setup | In the game |
+|---|---|---|
+| D-pad / left stick | Move between options | Move |
+| D-pad left / right | Change a value | |
+| A | Choose | Jump (PS2 ✕) |
+| B | Back | Crouch / slide (PS2 ○) |
+| X | | Spin (PS2 □) |
+| LB / RB | Previous / next page | |
+| Menu | Start the game | Pause |
+| View + Menu together | | The launcher's settings over the game |
+
+Game buttons can be remapped in Settings → Controls.
+
+## Reporting a problem
+
+Open an [issue](../../issues) with what you did and what happened, and attach the two log files from the app's data
+folder (Device Portal → File explorer → LocalAppData → NuWorld.CrashWOC_… → LocalState → crashwoc-nuworld):
+`nuworld.log` and `stdout.txt`.
+
+## Building from source
+
+The Xbox build: see [xbox/README.md](xbox/README.md) (toolchain, SDL3-uwp + our patch in
+[xbox/patches](xbox/patches), packaging, renderers). Renderer design and verification:
+[xbox/RENDERERS.md](xbox/RENDERERS.md). The PC build is unchanged from NuWorld: see
+[docs/NUWORLD_README.md](docs/NUWORLD_README.md).
+
+```
+git clone --recursive https://github.com/dgamermohammad09/CrashWOC-Xbox-Port.git
 ```
 
 ## Credits
 
-- [Kenney](https://kenney.nl) Input Prompts (CC0)
-- Atkinson Hyperlegible (SIL OFL)
-- [SDL3](https://libsdl.org)
-- [Dear ImGui](https://github.com/ocornut/imgui)
-- SPU2 interpolation table and reverb filter from [PCSX2](https://pcsx2.net)
+- **Xbox port:** Mohammad Aljafari ([@dgamermohammad09](https://github.com/dgamermohammad09))
+- **NuWorld** (the native PC port this is built on) and the **decompilation**: [denzi-gh](https://github.com/denzi-gh)
+  and contributors — [crashwoc-nuworld](https://github.com/denzi-gh/crashwoc-nuworld),
+  [crashwoc-decomp-ps2](https://github.com/denzi-gh/crashwoc-decomp-ps2)
+- [SDL3-uwp](https://github.com/XboxEmulationHub/SDL3-uwp) and [mesa-uwp](https://github.com/XboxEmulationHub/mesa-uwp)
+  (XboxEmulationHub), [SDL3](https://libsdl.org), [Mesa](https://mesa3d.org), [Dear ImGui](https://github.com/ocornut/imgui)
+- [Kenney](https://kenney.nl) Input Prompts (CC0), Atkinson Hyperlegible (SIL OFL), SPU2 interpolation table and
+  reverb filter from [PCSX2](https://pcsx2.net)
 
+Crash Bandicoot is a trademark of Activision. This project is not affiliated with or endorsed by Activision or
+Microsoft, and ships no game data.
 
 ## License
 
