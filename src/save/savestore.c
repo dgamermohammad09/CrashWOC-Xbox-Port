@@ -104,9 +104,20 @@ static bool nw_save_integrity(const char **text, size_t *size)
     }
     unsigned long long length = 0;
     unsigned crc = 0;
+    /* The header line ends at the first newline. Not %n: the Xbox build's sscanf counts it one too far. */
     int end = 0;
-    if (SDL_sscanf(*text, NW_SAVE_ENVELOPE "%llu %x%n", &length, &crc, &end) != 2 || end <= 0 ||
-        (size_t)end >= *size || (*text)[end] != '\n') {
+    while ((size_t)end < *size && end < 64 && (*text)[end] != '\n') {
+        end++;
+    }
+    if (end >= 64 || (size_t)end >= *size) {
+        end = 0;
+    }
+    char header[65];
+    if (end > 0) {
+        SDL_memcpy(header, *text, (size_t)end);
+        header[end] = '\0';
+    }
+    if (end <= 0 || (size_t)end >= *size || SDL_sscanf(header, NW_SAVE_ENVELOPE "%llu %x", &length, &crc) != 2) {
         return SDL_SetError("incomplete save integrity header");
     }
     *text += end + 1;

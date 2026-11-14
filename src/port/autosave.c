@@ -112,6 +112,13 @@ static void nw_autosave_worker(void *unused)
     }
 }
 
+/* Every failure is logged with where and why (the notice alone says nothing). */
+static void nw_autosave_failed(int line)
+{
+    SDL_Log("autosave: failed (autosave.c:%d): %s", line, SDL_GetError());
+    nw_autosave_notice(NW_AUTOSAVE_FAILED);
+}
+
 static void nw_autosave_collect(void)
 {
     nw_auto.pending = false;
@@ -122,7 +129,7 @@ static void nw_autosave_collect(void)
     } else {
         SDL_Log("autosave: %s", nw_auto.job.error);
         nw_auto.have_submitted = false;
-        nw_autosave_notice(NW_AUTOSAVE_FAILED);
+        nw_autosave_failed(__LINE__);
     }
 }
 
@@ -135,7 +142,7 @@ static void nw_autosave_start(void)
     nw_auto.dirty = false;
     const NwSaveRegistry *reg = nw_auto.dir ? nw_saves_levels() : NULL;
     if (!reg) {
-        nw_autosave_notice(NW_AUTOSAVE_FAILED);
+        nw_autosave_failed(__LINE__);
         return;
     }
     SDL_Time now = 0;
@@ -150,7 +157,7 @@ static void nw_autosave_start(void)
     nw_autosave_notice(NW_AUTOSAVE_WRITING);
     nw_auto.pending = nw_save_worker_submit(&nw_auto.task, nw_autosave_worker, NULL);
     if (!nw_auto.pending) {
-        nw_autosave_notice(NW_AUTOSAVE_FAILED);
+        nw_autosave_failed(__LINE__);
         return;
     }
     nw_auto.submitted = nw_auto.snapshot;
@@ -210,7 +217,7 @@ void nw_autosave_init(const char *dir)
     SDL_zero(nw_auto);
     nw_auto.dir = dir ? SDL_strdup(dir) : NULL;
     nw_auto.slot = -1;
-    if (dir && !nw_save_worker_init()) nw_autosave_notice(NW_AUTOSAVE_FAILED);
+    if (dir && !nw_save_worker_init()) nw_autosave_failed(__LINE__);
 }
 
 void nw_autosave_new(bool enabled)
@@ -241,7 +248,7 @@ void nw_autosave_loaded(const NwSaveMeta *meta, const struct game_s *game, const
     nw_auto.lookup.reg = nw_auto.dir ? nw_saves_levels() : NULL;
     nw_auto.lookup.requested = nw_auto.meta;
     nw_auto.lookup_pending = nw_save_worker_submit(&nw_auto.lookup_task, nw_autosave_lookup_worker, NULL);
-    if (!nw_auto.lookup_pending) nw_autosave_notice(NW_AUTOSAVE_FAILED);
+    if (!nw_auto.lookup_pending) nw_autosave_failed(__LINE__);
     if (recovered) {
         nw_autosave_recovered();
     }
@@ -289,7 +296,7 @@ void nw_autosave_poll(void)
     }
     if (nw_auto.prefs_pending && nw_save_worker_done(&nw_auto.prefs_task)) {
         nw_auto.prefs_pending = false;
-        if (!nw_auto.prefs.ok) nw_autosave_notice(NW_AUTOSAVE_FAILED);
+        if (!nw_auto.prefs.ok) nw_autosave_failed(__LINE__);
     }
     if (nw_auto.active && (Level == 0x23 || (cutmovie == 0 && Cursor.menu == 0))) {
         nw_autosave_leave();
@@ -342,7 +349,7 @@ bool nw_autosave_set(bool enabled)
         nw_auto.prefs.reg = nw_saves_levels();
         nw_auto.prefs.meta = nw_auto.meta;
         nw_auto.prefs_pending = nw_save_worker_submit(&nw_auto.prefs_task, nw_autosave_preferences, NULL);
-        if (!nw_auto.prefs_pending) nw_autosave_notice(NW_AUTOSAVE_FAILED);
+        if (!nw_auto.prefs_pending) nw_autosave_failed(__LINE__);
     }
     nw_auto.meta.autosave = enabled;
     nw_auto.dirty = enabled;
