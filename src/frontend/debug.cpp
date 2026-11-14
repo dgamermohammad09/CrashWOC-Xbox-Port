@@ -1,11 +1,14 @@
 #include "frontend/debug.h"
 
 #include <float.h>
+#include <math.h>
 #include <stdarg.h>
 
 #include "app.h"
+#include "frontend/artui.h"
 #include "frontend/ui.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 
 extern "C" {
 #include "platform/paths.h"
@@ -89,6 +92,275 @@ void nw_debug_action(const char *menu, const char *label, SDL_Scancode key, NwDe
     }
 }
 
+/* The launcher's rows (nw_debug_rows_begin): every widget a full-width row, its label left and its control right, the
+   focused one lit; tooltips go to the description instead of a popup. */
+static struct {
+    bool on;
+    bool same_line; /* nw_debug_same_line came last: the next widget shares a line (a table) and stays compact */
+    bool hot;       /* the last row drawn is focused or hovered */
+    char desc[512];
+    bool focused_desc; /* desc is the focused row's (a hovered one's only when nothing is focused) */
+    ImGuiID first;     /* the first row's ID */
+} nw_rows;
+
+void nw_debug_rows_begin(void)
+{
+    nw_rows.on = true;
+    nw_rows.same_line = false;
+    nw_rows.hot = false;
+    nw_rows.desc[0] = '\0';
+    nw_rows.focused_desc = false;
+    nw_rows.first = 0;
+}
+
+unsigned nw_debug_rows_first(void)
+{
+    return nw_rows.first;
+}
+
+const char *nw_debug_rows_end(void)
+{
+    nw_rows.on = false;
+    return nw_rows.desc;
+}
+
+static bool nw_rows_here(void)
+{
+    bool row = nw_rows.on && !nw_rows.same_line;
+    nw_rows.same_line = false;
+    return row;
+}
+
+static ImU32 nw_rows_col(unsigned rgb, float a)
+{
+    return nw_c(rgb, a * ImGui::GetStyle().Alpha);
+}
+
+static void nw_rows_hint(bool focused, const char *text)
+{
+    if (focused || !nw_rows.focused_desc) {
+        SDL_strlcpy(nw_rows.desc, text, sizeof(nw_rows.desc));
+        nw_rows.focused_desc = focused;
+    }
+}
+
+/* -1 / +1 for left / right on the keyboard, the d-pad or the stick, repeating. */
+static int nw_rows_dir(void)
+{
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft) ||
+        ImGui::IsKeyPressed(ImGuiKey_GamepadLStickLeft)) {
+        return -1;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) ||
+        ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight)) {
+        return 1;
+    }
+    return 0;
+}
+
+typedef struct NwRow {
+    ImVec2 a, b;      /* the row */
+    ImVec2 c0, c1;    /* the control's box on the right */
+    bool pressed, focused, hovered, hot;
+} NwRow;
+
+/* An invisible button over the whole row, its highlight and its label. */
+static NwRow nw_row(const char *label, const char *hint)
+{
+    NwRow r;
+    float fs = ImGui::GetFontSize(), w = ImGui::GetContentRegionAvail().x, h = fs * 2.0f;
+    r.a = ImGui::GetCursorScreenPos();
+    r.b = ImVec2(r.a.x + w, r.a.y + h);
+    r.pressed = ImGui::InvisibleButton(label, ImVec2(w, h));
+    if (!nw_rows.first) {
+        nw_rows.first = ImGui::GetItemID();
+    }
+    r.focused = ImGui::IsItemFocused();
+    r.hovered = ImGui::IsItemHovered();
+    r.hot = r.focused || r.hovered;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float round = h * 0.18f;
+    if (r.focused) {
+        dl->AddRectFilledMultiColor(r.a, r.b, nw_rows_col(NW_C_ORANGE, 0.95f), nw_rows_col(NW_C_ORANGE_DEEP, 0.55f),
+                                    nw_rows_col(NW_C_ORANGE_DEEP, 0.55f), nw_rows_col(NW_C_ORANGE, 0.95f));
+        dl->AddRect(r.a, r.b, nw_rows_col(NW_C_GOLD, 0.9f), round, fs * 0.08f);
+    } else if (r.hovered) {
+        dl->AddRectFilled(r.a, r.b, nw_rows_col(0xffffff, 0.08f), round);
+    } else {
+        dl->AddLine(ImVec2(r.a.x + fs * 0.4f, r.b.y - 0.5f), ImVec2(r.b.x - fs * 0.4f, r.b.y - 0.5f),
+                    nw_rows_col(0xffffff, 0.06f));
+    }
+    const char *end = ImGui::FindRenderedTextEnd(label);
+    ImVec2 ts = ImGui::CalcTextSize(label, end);
+    dl->AddText(ImVec2(r.a.x + fs * 0.7f, r.a.y + (h - ts.y) * 0.5f), nw_rows_col(r.focused ? 0xffffff : NW_C_CREAM, 1.0f),
+                label, end);
+    float cw = SDL_min(w * 0.46f, fs * 15.0f);
+    r.c0 = ImVec2(r.b.x - cw - fs * 0.5f, r.a.y + h * 0.16f);
+    r.c1 = ImVec2(r.b.x - fs * 0.5f, r.b.y - h * 0.16f);
+    nw_rows.hot = r.hot;
+    if (r.hot && hint) {
+        nw_rows_hint(r.focused, hint);
+    }
+    return r;
+}
+
+/* "<  value  >" in the control box. */
+static void nw_row_spinner(const NwRow *r, const char *value)
+{
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float h = r->c1.y - r->c0.y, aw = h * 0.28f;
+    dl->AddRectFilled(r->c0, r->c1, nw_rows_col(0x000000, r->focused ? 0.35f : 0.28f), h * 0.25f);
+    ImU32 arrow = nw_rows_col(r->focused ? 0xffffff : NW_C_ORANGE, 1.0f);
+    float cy = (r->c0.y + r->c1.y) * 0.5f;
+    dl->AddTriangleFilled(ImVec2(r->c0.x + h * 0.3f, cy), ImVec2(r->c0.x + h * 0.3f + aw, cy - aw),
+                          ImVec2(r->c0.x + h * 0.3f + aw, cy + aw), arrow);
+    dl->AddTriangleFilled(ImVec2(r->c1.x - h * 0.3f, cy), ImVec2(r->c1.x - h * 0.3f - aw, cy - aw),
+                          ImVec2(r->c1.x - h * 0.3f - aw, cy + aw), arrow);
+    ImVec2 ts = ImGui::CalcTextSize(value);
+    float room = r->c1.x - r->c0.x - h * 1.6f;
+    ImVec2 at((r->c0.x + r->c1.x - SDL_min(ts.x, room)) * 0.5f, cy - ts.y * 0.5f);
+    dl->PushClipRect(ImVec2(r->c0.x + h * 0.8f, r->c0.y), ImVec2(r->c1.x - h * 0.8f, r->c1.y), true);
+    dl->AddText(at, nw_rows_col(0xffffff, 1.0f), value);
+    dl->PopClipRect();
+}
+
+/* -1 / +1 when the row is clicked on its arrows or left / right is pressed on it, +1 for a press elsewhere. */
+static int nw_row_step(const NwRow *r)
+{
+    int d = r->focused ? nw_rows_dir() : 0;
+    if (r->pressed) {
+        float mx = ImGui::GetIO().MousePos.x, h = r->c1.y - r->c0.y;
+        bool mouse = ImGui::GetIO().MouseClicked[0] || ImGui::GetIO().MouseReleased[0];
+        d = mouse && mx >= r->c0.x && mx < r->c0.x + h * 1.0f ? -1 : 1;
+    }
+    return d;
+}
+
+static bool nw_row_combo(const char *label, int *index, const char *const *items, int count)
+{
+    NwRow r = nw_row(label, "Left / right: change");
+    int d = count > 0 ? nw_row_step(&r) : 0;
+    bool changed = false;
+    if (d) {
+        *index = ((*index + d) % count + count) % count;
+        changed = true;
+    }
+    nw_row_spinner(&r, count > 0 && *index >= 0 && *index < count ? items[*index] : "-");
+    return changed;
+}
+
+static void nw_row_switch(const NwRow *r, bool on)
+{
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float h = r->c1.y - r->c0.y, w = h * 2.1f;
+    ImVec2 a(r->c1.x - w, r->c0.y), b(r->c1.x, r->c1.y);
+    dl->AddRectFilled(a, b, on ? nw_rows_col(NW_C_GREEN, 1.0f) : nw_rows_col(0x000000, 0.45f), h * 0.5f);
+    dl->AddRect(a, b, nw_rows_col(0xffffff, on ? 0.6f : 0.25f), h * 0.5f, 1.5f);
+    float k = h * 0.5f, x = on ? b.x - k : a.x + k;
+    dl->AddCircleFilled(ImVec2(x, (a.y + b.y) * 0.5f), k * 0.78f, nw_rows_col(0xffffff, 1.0f), 24);
+    const char *text = on ? "ON" : "OFF";
+    ImVec2 ts = ImGui::CalcTextSize(text);
+    dl->AddText(ImVec2(a.x - ts.x - h * 0.4f, (a.y + b.y - ts.y) * 0.5f), nw_rows_col(on ? NW_C_GOLD : NW_C_MUTED, 1.0f),
+                text);
+}
+
+static bool nw_row_checkbox(const char *label, bool *value)
+{
+    NwRow r = nw_row(label, "A / Enter: switch on or off");
+    int d = r.focused ? nw_rows_dir() : 0;
+    bool changed = false;
+    if (r.pressed || (d < 0 && *value) || (d > 0 && !*value)) {
+        *value = !*value;
+        changed = true;
+    }
+    nw_row_switch(&r, *value);
+    return changed;
+}
+
+static bool nw_row_button(const char *label)
+{
+    NwRow r = nw_row(label, "A / Enter: do it");
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float h = r.c1.y - r.c0.y, cy = (r.c0.y + r.c1.y) * 0.5f, k = h * 0.22f;
+    ImU32 c = nw_rows_col(r.focused ? 0xffffff : NW_C_ORANGE, 1.0f);
+    dl->AddLine(ImVec2(r.c1.x - k * 2.2f, cy - k), ImVec2(r.c1.x - k * 1.2f, cy), c, k * 0.5f);
+    dl->AddLine(ImVec2(r.c1.x - k * 1.2f, cy), ImVec2(r.c1.x - k * 2.2f, cy + k), c, k * 0.5f);
+    return r.pressed;
+}
+
+/* value in lo..hi as 0..1, log or linear. */
+static float nw_row_frac(float v, float lo, float hi, bool log)
+{
+    if (log && lo > 0.0f && hi > lo) {
+        return SDL_clamp((logf(v) - logf(lo)) / (logf(hi) - logf(lo)), 0.0f, 1.0f);
+    }
+    return hi > lo ? SDL_clamp((v - lo) / (hi - lo), 0.0f, 1.0f) : 0.0f;
+}
+
+static float nw_row_unfrac(float f, float lo, float hi, bool log)
+{
+    if (log && lo > 0.0f && hi > lo) {
+        return expf(logf(lo) + f * (logf(hi) - logf(lo)));
+    }
+    return lo + f * (hi - lo);
+}
+
+/* A bar in the control box; the mouse drags it, left / right step it. Returns the new fraction or -1. */
+static float nw_row_bar(const NwRow *r, float frac, const char *text)
+{
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float h = r->c1.y - r->c0.y, tw = ImGui::CalcTextSize("00000000").x;
+    ImVec2 a(r->c0.x, (r->c0.y + r->c1.y) * 0.5f - h * 0.14f), b(r->c1.x - tw - h * 0.3f, a.y + h * 0.28f);
+    dl->AddRectFilled(a, b, nw_rows_col(0x000000, 0.45f), h);
+    dl->AddRectFilledMultiColor(a, ImVec2(a.x + (b.x - a.x) * frac, b.y), nw_rows_col(NW_C_GOLD, 1.0f),
+                                nw_rows_col(NW_C_ORANGE, 1.0f), nw_rows_col(NW_C_ORANGE, 1.0f), nw_rows_col(NW_C_GOLD, 1.0f));
+    dl->AddCircleFilled(ImVec2(a.x + (b.x - a.x) * frac, (a.y + b.y) * 0.5f), h * 0.3f,
+                        nw_rows_col(r->focused ? 0xffffff : NW_C_CREAM, 1.0f), 20);
+    ImVec2 ts = ImGui::CalcTextSize(text);
+    dl->AddText(ImVec2(r->c1.x - ts.x, (r->c0.y + r->c1.y - ts.y) * 0.5f), nw_rows_col(0xffffff, 1.0f), text);
+    if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        float mx = ImGui::GetIO().MousePos.x;
+        if (mx >= a.x - h && mx <= b.x + h) {
+            return SDL_clamp((mx - a.x) / SDL_max(b.x - a.x, 1.0f), 0.0f, 1.0f);
+        }
+    }
+    return -1.0f;
+}
+
+static bool nw_row_slider(const char *label, float *value, float lo, float hi, bool log)
+{
+    NwRow r = nw_row(label, "Left / right: adjust");
+    char text[32];
+    SDL_snprintf(text, sizeof(text), "%.3g", *value);
+    float f = nw_row_bar(&r, nw_row_frac(*value, lo, hi, log), text);
+    float old = *value;
+    if (f >= 0.0f) {
+        *value = nw_row_unfrac(f, lo, hi, log);
+    }
+    int d = r.focused ? nw_rows_dir() : 0;
+    if (d) {
+        *value = nw_row_unfrac(SDL_clamp(nw_row_frac(*value, lo, hi, log) + 0.02f * (float)d, 0.0f, 1.0f), lo, hi, log);
+    }
+    return *value != old;
+}
+
+static bool nw_row_slider_int(const char *label, int *value, int lo, int hi)
+{
+    NwRow r = nw_row(label, "Left / right: adjust");
+    char text[32];
+    SDL_snprintf(text, sizeof(text), "%d", *value);
+    float f = nw_row_bar(&r, hi > lo ? (float)(*value - lo) / (float)(hi - lo) : 0.0f, text);
+    int old = *value;
+    if (f >= 0.0f) {
+        *value = lo + (int)lroundf(f * (float)(hi - lo));
+    }
+    int d = r.focused ? nw_rows_dir() : 0;
+    if (d) {
+        *value = SDL_clamp(*value + d * SDL_max((hi - lo) / 100, 1), lo, hi);
+    }
+    return *value != old;
+}
+
 char *nw_debug_file(const char *folder, const char *ext)
 {
     char *dir = nw_debug.root ? nw_paths_dir(nw_debug.root, folder, true) : NULL;
@@ -107,14 +379,31 @@ void nw_debug_text(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
-    ImGui::TextV(fmt, ap);
-    ImGui::PopTextWrapPos();
+    if (nw_rows.on) {
+        nw_rows.same_line = false;
+        ImGui::PushStyleColor(ImGuiCol_Text, nw_cv(NW_C_MUTED));
+        ImGui::Indent(ImGui::GetFontSize() * 0.7f);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextV(fmt, ap);
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(ImGui::GetFontSize() * 0.7f);
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+        ImGui::TextV(fmt, ap);
+        ImGui::PopTextWrapPos();
+    }
     va_end(ap);
 }
 
 void nw_debug_tooltip(const char *text)
 {
+    if (nw_rows.on) {
+        if (ImGui::IsItemFocused() || ImGui::IsItemHovered()) {
+            nw_rows_hint(ImGui::IsItemFocused(), text);
+        }
+        return;
+    }
     ImGui::SetItemTooltip("%s", text);
 }
 
@@ -126,6 +415,9 @@ void nw_debug_label(const char *text)
 
 bool nw_debug_button(const char *label)
 {
+    if (nw_rows_here()) {
+        return nw_row_button(label);
+    }
     return ImGui::Button(label);
 }
 
@@ -141,6 +433,9 @@ void nw_debug_enable_end(void)
 
 bool nw_debug_checkbox(const char *label, bool *value)
 {
+    if (nw_rows_here()) {
+        return nw_row_checkbox(label, value);
+    }
     return ImGui::Checkbox(label, value);
 }
 
@@ -155,21 +450,31 @@ void nw_debug_indent(bool in)
 
 void nw_debug_same_line(float column)
 {
-    ImGui::SameLine(column * ImGui::GetFontSize());
+    nw_rows.same_line = nw_rows.on;
+    ImGui::SameLine(column * ImGui::GetFontSize() * (nw_rows.on ? 1.15f : 1.0f));
 }
 
 bool nw_debug_slider(const char *label, float *value, float lo, float hi, bool log)
 {
+    if (nw_rows_here()) {
+        return nw_row_slider(label, value, lo, hi, log);
+    }
     return ImGui::SliderFloat(label, value, lo, hi, "%.3g", log ? ImGuiSliderFlags_Logarithmic : 0);
 }
 
 bool nw_debug_slider_int(const char *label, int *value, int lo, int hi)
 {
+    if (nw_rows_here()) {
+        return nw_row_slider_int(label, value, lo, hi);
+    }
     return ImGui::SliderInt(label, value, lo, hi, "%d", ImGuiSliderFlags_AlwaysClamp);
 }
 
 bool nw_debug_combo(const char *label, int *index, const char *const *items, int count)
 {
+    if (nw_rows_here()) {
+        return nw_row_combo(label, index, items, count);
+    }
     return ImGui::Combo(label, index, items, count);
 }
 
@@ -195,6 +500,18 @@ void nw_debug_list_end(void)
 
 void nw_debug_heading(const char *text)
 {
+    if (nw_rows.on) {
+        nw_rows.same_line = false;
+        ImGui::Dummy(ImVec2(1, ImGui::GetFontSize() * 0.5f));
+        nw_ui_push_font(NW_UI_BOLD, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, nw_cv(NW_C_GOLD));
+        ImGui::Indent(ImGui::GetFontSize() * 0.7f);
+        ImGui::TextUnformatted(text);
+        ImGui::Unindent(ImGui::GetFontSize() * 0.7f);
+        ImGui::PopStyleColor();
+        nw_ui_pop_font();
+        return;
+    }
     ImGui::SeparatorText(text);
 }
 
@@ -230,9 +547,9 @@ void nw_debug_item_draw(unsigned i)
     NwDebugItem *item = &nw_debug.items[i];
     ImGui::PushID((int)i);
     if (item->kind == NW_DEBUG_TOGGLE) {
-        ImGui::Checkbox(item->label, item->value);
+        nw_debug_checkbox(item->label, item->value);
     } else if (item->kind == NW_DEBUG_ACTION) {
-        if (ImGui::Button(item->label)) {
+        if (nw_debug_button(item->label)) {
             item->fn(item->user);
         }
     } else {
@@ -447,6 +764,12 @@ bool nw_debug_wants_keyboard(void)
 void nw_debug_show(bool shown)
 {
     nw_debug.shown = shown;
+    const char *panel = shown ? SDL_getenv("NW_OVERLAY_PANEL") : NULL;
+    for (uint32_t i = 0; panel && i < nw_debug.nitems; i++) {
+        if (nw_debug.items[i].kind == NW_DEBUG_PANEL && SDL_strcmp(nw_debug.items[i].label, panel) == 0) {
+            nw_debug.items[i].open = true;
+        }
+    }
 }
 
 void nw_debug_frame(void)
@@ -458,7 +781,17 @@ void nw_debug_frame(void)
     if (ImGui::BeginMainMenuBar()) {
         char rate[32];
         SDL_snprintf(rate, sizeof(rate), "%.0f fps", ImGui::GetIO().Framerate);
-        ImGui::TextDisabled(NW_APP_NAME);
+        if (nw_gameart_font()) {
+            /* the game's letters, as its own menus */
+            float h = ImGui::GetFrameHeight() * 0.92f;
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            float w = nw_art_text(ImGui::GetWindowDrawList(), ImVec2(p.x, p.y + (ImGui::GetFrameHeight() - h) * 0.5f), h,
+                                  NW_INK_ORANGE, "NUWORLD");
+            ImGui::Dummy(ImVec2(w + h * 0.3f, ImGui::GetFrameHeight()));
+            ImGui::SetItemTooltip("%s", nw_art_app_title());
+        } else {
+            ImGui::TextDisabled("%s", nw_art_app_title());
+        }
         nw_debug_menu("", 0);
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(rate).x);
         ImGui::TextUnformatted(rate);

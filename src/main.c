@@ -1149,6 +1149,9 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
     {
         char *root = nw_data_root(data_dir);
         nw_help_start(platform.window, root);
+        if (!nw_pad_script) {
+            nw_gameart_load(root); /* the launcher's and the overlay's art from the disc */
+        }
         SDL_free(root);
     }
     if (nw_launcher_enabled && !nw_pad_script && !nw_run_level) {
@@ -1163,6 +1166,9 @@ static int nw_boot(const char *data_dir, int hardware_speed, float aspect, NwPla
     }
     if (!nw_run_hz) {
         nw_run_hz = settings.hz;
+    }
+    if (SDL_getenv("NW_OVERLAY_SHOW")) {
+        nw_debug_show(true); /* test hook: the F1 overlay from the start (+ NW_OVERLAY_PANEL=<title> opens a panel) */
     }
     int code = nw_boot_prepare(data_dir, NW_CLOCK_REALTIME, settings.hardware_speed);
     if (code) {

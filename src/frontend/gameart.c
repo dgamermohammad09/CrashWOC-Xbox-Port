@@ -788,6 +788,19 @@ static uint8_t *nw_art_spin(const NwArtScene *s, NwArtModel *m, const char *name
     }
     size_t first = m->ntris;
     nw_art_scene_special(s, m, i, i);
+    /* turn it about its own centre */
+    float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+    for (size_t t = first; t < m->ntris; t++) {
+        for (int k = 0; k < 9; k++) {
+            lo[k % 3] = SDL_min(lo[k % 3], m->tris[t].v[k / 3].p[k % 3]);
+            hi[k % 3] = SDL_max(hi[k % 3], m->tris[t].v[k / 3].p[k % 3]);
+        }
+    }
+    for (size_t t = first; t < m->ntris; t++) {
+        for (int k = 0; k < 9; k++) {
+            m->tris[t].v[k / 3].p[k % 3] -= (lo[k % 3] + hi[k % 3]) * 0.5f;
+        }
+    }
     int rows = (frames + cols - 1) / cols;
     uint8_t *sheet = m->ntris > first ? SDL_calloc((size_t)cols * size * rows * size, 4) : NULL;
     if (!sheet) {

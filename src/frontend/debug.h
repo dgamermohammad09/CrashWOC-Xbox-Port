@@ -72,6 +72,12 @@ unsigned nw_debug_items(void);
 bool nw_debug_item(unsigned i, NwDebugItemKind *kind, const char **menu, const char **label);
 /* A panel's contents, a toggle's checkbox or an action's button, in the current ImGui window. */
 void nw_debug_item_draw(unsigned i);
+/* The launcher's layout for the items drawn until nw_debug_rows_end: a row each, label left, control right (left /
+   right change a value), tooltips not shown but returned: the focused (else hovered) row's description, "" none. */
+void nw_debug_rows_begin(void);
+const char *nw_debug_rows_end(void);
+/* The ImGuiID of the first row drawn since nw_debug_rows_begin, 0 none. */
+unsigned nw_debug_rows_first(void);
 
 #ifdef __cplusplus
 }
