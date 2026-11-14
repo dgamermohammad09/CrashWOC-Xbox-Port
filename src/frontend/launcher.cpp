@@ -200,6 +200,12 @@ static void nw_launcher_open(NwLauncher *l, int menu)
     l->since = ImGui::GetTime();
 }
 
+/* The chosen item's letters as the game's menus flash them (DrawMenuEntry): orange and blue, 5 frames each. */
+static NwArtInk nw_launcher_flash(float t)
+{
+    return fmodf(t * 6.0f, 1.0f) < 0.5f ? NW_INK_ORANGE : NW_INK_BLUE;
+}
+
 /* The wumpa fruit cursor, turning; a drawn fruit without the disc's. */
 static void nw_launcher_wumpa(ImDrawList *dl, ImVec2 c, float r, float t)
 {
@@ -270,15 +276,15 @@ static int nw_launcher_main(NwLauncher *l, float W, float H, ImVec2 o, float s, 
         if (sel) {
             /* a glow behind the chosen item, the fruit either side */
             dl->AddRectFilledMultiColor(ImVec2(p.x - h * 2.2f, p.y + h * 0.1f), ImVec2(o.x + W * 0.5f, p.y + h * 0.9f),
-                                        nw_c(NW_C_ORANGE, 0.0f), nw_c(NW_C_ORANGE, 0.22f * delay),
-                                        nw_c(NW_C_ORANGE, 0.22f * delay), nw_c(NW_C_ORANGE, 0.0f));
+                                        nw_c(0x2a8cff, 0.0f), nw_c(0x2a8cff, 0.22f * delay),
+                                        nw_c(0x2a8cff, 0.22f * delay), nw_c(0x2a8cff, 0.0f));
             dl->AddRectFilledMultiColor(ImVec2(o.x + W * 0.5f, p.y + h * 0.1f), ImVec2(p.x + w + h * 2.2f, p.y + h * 0.9f),
-                                        nw_c(NW_C_ORANGE, 0.22f * delay), nw_c(NW_C_ORANGE, 0.0f), nw_c(NW_C_ORANGE, 0.0f),
-                                        nw_c(NW_C_ORANGE, 0.22f * delay));
+                                        nw_c(0x2a8cff, 0.22f * delay), nw_c(0x2a8cff, 0.0f), nw_c(0x2a8cff, 0.0f),
+                                        nw_c(0x2a8cff, 0.22f * delay));
             nw_launcher_wumpa(dl, ImVec2(p.x - h * 0.9f, p.y + h * 0.5f), h * 0.62f, t);
             nw_launcher_wumpa(dl, ImVec2(p.x + w + h * 0.9f, p.y + h * 0.5f), h * 0.62f, t + 0.6f);
         }
-        nw_art_text(dl, p, h, sel ? NW_INK_ORANGE : NW_INK_GOLD, label, delay);
+        nw_art_text(dl, p, h, sel ? nw_launcher_flash(t) : NW_INK_GOLD, label, delay);
     }
     if (nw_key_up()) {
         l->main_sel = (l->main_sel + items - 1) % items;
@@ -348,14 +354,14 @@ static int nw_launcher_options(NwLauncher *l, float W, float H, ImVec2 o, float 
         }
         if (sel) {
             fg->AddRectFilledMultiColor(ImVec2(cx - H * 0.01f, p.y - ch * 0.25f), ImVec2(o.x + W * 0.29f, p.y + ch * 1.25f),
-                                        nw_c(NW_C_ORANGE, l->zone ? 0.10f : 0.28f), nw_c(NW_C_ORANGE, 0.0f),
-                                        nw_c(NW_C_ORANGE, 0.0f), nw_c(NW_C_ORANGE, l->zone ? 0.10f : 0.28f));
+                                        nw_c(0x2a8cff, l->zone ? 0.10f : 0.28f), nw_c(0x2a8cff, 0.0f),
+                                        nw_c(0x2a8cff, 0.0f), nw_c(0x2a8cff, l->zone ? 0.10f : 0.28f));
             nw_launcher_wumpa(fg, ImVec2(cx + H * 0.012f, p.y + ch * 0.5f), ch * 0.62f, t);
         }
         NwArtId head = SDL_strcmp(l->cats[i].label, "CRASH") == 0 ? NW_ART_CRASH
                        : SDL_strcmp(l->cats[i].label, "COCO") == 0 ? NW_ART_COCO
                                                                   : NW_ART_COUNT;
-        float tw = nw_art_text(fg, p, ch, sel ? NW_INK_ORANGE : NW_INK_GOLD, l->cats[i].label, in * (sel || !l->zone ? 1.0f : 0.6f));
+        float tw = nw_art_text(fg, p, ch, sel ? nw_launcher_flash(t) : NW_INK_GOLD, l->cats[i].label, in * (sel || !l->zone ? 1.0f : 0.6f));
         if (head != NW_ART_COUNT) {
             nw_art_image(fg, head, 0, ImVec2(p.x + tw + ch * 0.3f, p.y - ch * 0.2f), ImVec2(p.x + tw + ch * 1.7f, p.y + ch * 1.2f),
                          nw_c(0xffffff, in));

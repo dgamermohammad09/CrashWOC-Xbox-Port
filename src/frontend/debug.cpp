@@ -793,8 +793,10 @@ void nw_debug_frame(void)
             ImGui::TextDisabled("%s", nw_art_app_title());
         }
         nw_debug_menu("", 0);
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(rate).x);
-        ImGui::TextUnformatted(rate);
+        if (ImGui::GetContentRegionAvail().x > ImGui::CalcTextSize(rate).x + ImGui::GetFontSize()) { /* room left */
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(rate).x);
+            ImGui::TextUnformatted(rate);
+        }
         ImGui::EndMainMenuBar();
     }
     nw_debug_panels();

@@ -40,7 +40,7 @@ typedef struct NwArtImage {
 /* The font's colours: Text3D's materials over the letters' faces. */
 typedef enum NwArtInk {
     NW_INK_GOLD,   /* the menus' letters */
-    NW_INK_ORANGE, /* the chosen item */
+    NW_INK_ORANGE, /* the chosen item flashes orange and blue (the game's DrawMenuEntry) */
     NW_INK_BLUE,
     NW_INK_GREEN,
     NW_INK_COUNT,
