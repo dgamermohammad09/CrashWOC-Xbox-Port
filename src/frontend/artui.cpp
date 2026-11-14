@@ -47,11 +47,7 @@ ImVec4 nw_cv(unsigned rgb, float a)
 
 const char *nw_art_app_title(void)
 {
-#ifdef NW_UWP
-    return NW_APP_NAME " - Xbox Port Beta";
-#else
-    return NW_APP_NAME;
-#endif
+    return NW_APP_TITLE;
 }
 
 static float nw_art_hash(int i)

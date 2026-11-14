@@ -1055,6 +1055,8 @@ static void nw_art_load_sounds(const NwVfs *vfs)
     for (int i = 0; i < NW_SOUND_COUNT; i++) {
         nw_art.sounds[i] = nw_art_vag(&dat, names[i], &nw_art.sound_frames[i]);
     }
+    SDL_Log("gameart: menu sounds %s, %s, %s", nw_art.sounds[0] ? "yes" : "no", nw_art.sounds[1] ? "yes" : "no",
+            nw_art.sounds[2] ? "yes" : "no");
     nw_dat_close(&dat);
 #else
     (void)vfs;

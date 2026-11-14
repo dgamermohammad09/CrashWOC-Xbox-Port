@@ -70,3 +70,32 @@ needs `env LIBGL_ALWAYS_SOFTWARE=true` and `env GALLIUM_DRIVER=d3d12` (Mesa on W
 Direct3D 12 and Vulkan (Dozen) switch to WARP by themselves (logged).
 `env NW_WINDOW_SHOT=<png>` saves the game window's frame 30 s in (`NW_WINDOW_SHOT_MS`), `env NW_LAUNCHER_SHOT=<png>`
 the launcher's.
+
+## UI
+
+All UI is Dear ImGui on `nw_rhi_*`, so it is the same on every renderer and in the UWP build, controller first.
+
+- **Launcher** (`src/frontend/launcher.cpp`): built like the game's own front end from **the user's imported disc**,
+  read at run time by `src/frontend/gameart.c` (nothing of the game is in the repository or the package): the 3D
+  title logo (`LEVELS\B\LOGOS\TITLE.GHG`), crates, the Wumpa fruit and the heads (`STUFF\CRATES.GSC`,
+  `STUFF\WUMPA.GSC`) drawn once by a small software rasteriser into textures, the 3D font (`STUFF\FONT.GSC`, Text3D's
+  glyphs and colour textures) as a glyph atlas, the pause menu's metal monitor (`STUFF\PAUSE.GSC`) nine-sliced, and
+  the menu sounds MenuMove / MenuSelect / MenuBack (`SFX.DAT`: `GENERIC\CLET_BP`, `SEL_BP`, `UDLT_BP`). Main menu:
+  PLAY, the F1 overlay's menus, QUIT, the chosen item orange between two turning Wumpa fruit. A menu opens its pages
+  on the left and the options in the monitor on the right: a row each (label left, control right; left / right
+  change a value, A switches or runs), the focused row's description in the monitor's bottom slot, button prompts
+  (`assets/prompts`) along the bottom, LB / RB (Q / E) page through, B (Esc) goes back, Menu (Start) plays. Without
+  the art (no disc, damaged files) the same layout falls back to drawn text and a drawn steel frame.
+- **First-time setup** (`src/frontend/wizard.cpp`): no game art exists yet, so a plain design in the game's colours:
+  steps 1 Find disc, 2 Import, 3 Play, one card per step, big buttons. Xbox: **Choose disc image...** (the system file
+  picker, several files: the .iso, or the .cue and its .bin) and **Choose folder...**; with the hints
+  `SDL_WINRT_PICKER_COPY_TO` (the import folder) and `SDL_WINRT_PICKER_EXTENSIONS` (`.iso;.cue;.bin`) SDL3-uwp copies
+  the picks into the import folder ("Copying from the drive..."), then the import starts (a folder with several
+  images: pick one in the list). The USB drive and import folder lists stay. Desktop: Choose disc image... (file
+  dialog), Open import folder, drag and drop.
+- **F1 overlay** (`src/frontend/debug.cpp`, `ui.cpp`): the same palette, compact; the game's letters for its name.
+- The Xbox build calls itself **CrashWOC: NuWorld - Xbox Port Beta** (`NW_APP_TITLE`, `src/app.h`).
+- `--dump-art <dir>` writes every texture and object of the front-end files and what the launcher builds as PNGs
+  (for development; keep them out of the repository). Test hooks: `NW_LAUNCHER_SHOT=<png>`, `NW_LAUNCHER_PAGE=<menu>`,
+  `NW_LAUNCHER_CAT=<page>`, `NW_LAUNCHER_FOCUS=1`, `NW_LAUNCHER_EXIT=1|play`, `NW_LAUNCHER_SHOT_FRAME=<n>`;
+  `NW_WIZARD_PAGE=welcome|done|failed|copying`; `NW_OVERLAY_SHOW=1` (+ `NW_OVERLAY_PANEL=<title>`).

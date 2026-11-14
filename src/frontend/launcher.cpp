@@ -494,7 +494,7 @@ NwLauncherResult nw_launcher_run(SDL_Window *window, const char *version, NwLaun
     int result = -1;
     const char *shot = SDL_getenv("NW_LAUNCHER_SHOT"), *page = SDL_getenv("NW_LAUNCHER_PAGE");
     const char *shot_exit = SDL_getenv("NW_LAUNCHER_EXIT"); /* "play" starts the game after the shot */
-    int frames = 0;
+    int frames = 0, shot_frame = SDL_getenv("NW_LAUNCHER_SHOT_FRAME") ? SDL_atoi(SDL_getenv("NW_LAUNCHER_SHOT_FRAME")) : 60;
     nw_gameart_audio_open();
     if (page && SDL_isdigit((unsigned char)page[0]) && l.nmenus > 0) {
         nw_launcher_open(&l, SDL_clamp(SDL_atoi(page), 0, l.nmenus - 1));
@@ -583,7 +583,7 @@ NwLauncherResult nw_launcher_run(SDL_Window *window, const char *version, NwLaun
         }
         nw_ui_pop_font();
         nw_ui_end();
-        if (shot && ++frames == 60) {
+        if (shot && ++frames == shot_frame) {
             nw_launcher_shot(window, shot);
             if (shot_exit) {
                 result = SDL_strcmp(shot_exit, "play") == 0 ? NW_LAUNCHER_PLAY : NW_LAUNCHER_QUIT;

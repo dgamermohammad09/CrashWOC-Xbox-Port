@@ -762,7 +762,7 @@ static bool nw_window_ready(NwPlatform *p, const char *data_dir)
 
 static bool nw_window_open(NwPlatform *p, const char *data_dir)
 {
-    return nw_platform_init(p, NW_APP_NAME, 1280, 720) && nw_window_ready(p, data_dir);
+    return nw_platform_init(p, NW_APP_TITLE, 1280, 720) && nw_window_ready(p, data_dir);
 }
 
 static void nw_window_close(NwPlatform *p)
@@ -1049,7 +1049,7 @@ static void nw_boot_fatal(SDL_Window *window, const char *data_dir)
                  nw_game_error(), root ? root : "", NW_PATHS_LOG);
     SDL_free(root);
     SDL_SetWindowFullscreen(window, false);
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, NW_APP_NAME, msg, window);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, NW_APP_TITLE, msg, window);
 }
 
 /* Runs the game in the window; hardware_speed and aspect -1 take settings.toml's, which the debug menu changes and
@@ -1569,7 +1569,7 @@ static int nw_scene_check(const char *exe, const char *data_dir, const char *pat
 static int nw_setup(const char *data_dir, int max_frames, NwPlatform *window)
 {
     NwPlatform platform;
-    if (!nw_platform_init(&platform, NW_APP_NAME, 1280, 720)) {
+    if (!nw_platform_init(&platform, NW_APP_TITLE, 1280, 720)) {
         return 1;
     }
     char *root = nw_data_root(data_dir);
@@ -1577,7 +1577,7 @@ static int nw_setup(const char *data_dir, int max_frames, NwPlatform *window)
         char msg[512];
         SDL_snprintf(msg, sizeof(msg), "%s:\n%s", root ? "The interface could not start" : "No data folder",
                      SDL_GetError());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, NW_APP_NAME, msg, platform.window);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, NW_APP_TITLE, msg, platform.window);
         SDL_free(root);
         nw_platform_shutdown(&platform);
         return 1;

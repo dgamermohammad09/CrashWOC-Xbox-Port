@@ -123,6 +123,7 @@ static void SDLCALL nw_wizard_picked(void *user, const char *const *files, int f
     }
 }
 
+#ifndef NW_UWP
 /* Opens dir in the file manager through a file:// URL. */
 static void nw_wizard_open_folder(const char *dir)
 {
@@ -147,6 +148,7 @@ static void nw_wizard_open_folder(const char *dir)
     }
     SDL_free(url);
 }
+#endif
 
 NwWizard *nw_wizard_create(SDL_Window *window, const char *root)
 {
@@ -415,9 +417,16 @@ static bool nw_wizard_image_row(const char *name, const char *where, int id)
     return pressed;
 }
 
-/* The buttons at the bottom right; count labels, returns the pressed one or -1. kinds: 1 the main one. */
+static bool nw_wizard_in_body; /* the page's scrolling body is open */
+
+/* The buttons at the bottom right of the card, below the page's scrolling body (which this closes); count labels,
+   returns the pressed one or -1. kinds: 1 the main one. */
 static int nw_wizard_buttons(const char *const *labels, const int *kinds, int count)
 {
+    if (nw_wizard_in_body) {
+        ImGui::EndChild();
+        nw_wizard_in_body = false;
+    }
     float fs = ImGui::GetFontSize(), bh = fs * 2.3f, gap = fs * 0.7f, total = 0.0f;
     float widths[4];
     nw_ui_push_font(NW_UI_BOLD, 1.0f);
@@ -427,11 +436,7 @@ static int nw_wizard_buttons(const char *const *labels, const int *kinds, int co
     }
     nw_ui_pop_font();
     float avail = ImGui::GetContentRegionAvail().x;
-    /* at the card's bottom when the page leaves room */
-    float bottom = ImGui::GetWindowHeight() - bh - fs * 0.3f;
-    if (ImGui::GetCursorPosY() < bottom && ImGui::GetScrollMaxY() <= 0.0f) {
-        ImGui::SetCursorPosY(bottom);
-    }
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - bh - fs * 0.15f);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + SDL_max(avail - total, 0.0f));
     int pressed = -1;
     for (int i = 0; i < count; i++) {
@@ -571,7 +576,6 @@ static NwWizardResult nw_wizard_pick(NwWizard *w)
     ImGui::TextWrapped("%s", w->import_dir);
     ImGui::PopStyleColor();
 
-    ImGui::Dummy(ImVec2(1, fs * 0.6f));
     static const char *const both[] = { "Start game", "Quit" }, *const quit[] = { "Quit" };
     static const int both_kinds[] = { 1, 0 }, quit_kinds[] = { 0 };
     int pressed = w->had_disc ? nw_wizard_buttons(both, both_kinds, 2) : nw_wizard_buttons(quit, quit_kinds, 1);
@@ -680,7 +684,7 @@ static NwWizardResult nw_wizard_welcome(NwWizard *w)
     nw_wizard_section("Settings and the debug menu");
     float avail = ImGui::GetContentRegionAvail().x;
     if (w->shot) {
-        float width = avail * 0.42f, height = width * (float)w->shot_h / (float)w->shot_w;
+        float width = avail * 0.34f, height = width * (float)w->shot_h / (float)w->shot_w;
         ImVec2 p = ImGui::GetCursorScreenPos();
         ImGui::Image((ImTextureID)nw_rhi_texture_ui(w->shot), ImVec2(width, height));
         ImGui::GetWindowDrawList()->AddRect(p, ImVec2(p.x + width, p.y + height), nw_c(0x3a4580), 4.0f, 1.5f);
@@ -713,7 +717,6 @@ static NwWizardResult nw_wizard_welcome(NwWizard *w)
     if (nw_art_button("Discord", ImVec2(fs * 8.0f, fs * 2.2f), 0)) {
         SDL_OpenURL(NW_WIZARD_DISCORD_URL);
     }
-    ImGui::Dummy(ImVec2(1, fs * 0.6f));
     static const char *const start[] = { "Start game" };
     static const int kinds[] = { 1 };
     NwWizardResult r = nw_wizard_buttons(start, kinds, 1) == 0 ? NW_WIZARD_CLOSED : NW_WIZARD_OPEN;
@@ -815,6 +818,14 @@ NwWizardResult nw_wizard_draw(NwWizard *w)
     ImGui::Begin("##setup", NULL,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
+    {
+        /* the page scrolls above the button row */
+        float fs = ImGui::GetFontSize();
+        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, fs * 0.6f);
+        ImGui::BeginChild("##body", ImVec2(0.0f, ImGui::GetContentRegionAvail().y - fs * 3.0f), ImGuiChildFlags_NavFlattened);
+        ImGui::PopStyleVar();
+        nw_wizard_in_body = true;
+    }
     switch (w->page) {
     case NW_PAGE_PICK:
         result = nw_wizard_pick(w);
@@ -831,6 +842,10 @@ NwWizardResult nw_wizard_draw(NwWizard *w)
     case NW_PAGE_WELCOME:
         result = nw_wizard_welcome(w);
         break;
+    }
+    if (nw_wizard_in_body) {
+        ImGui::EndChild();
+        nw_wizard_in_body = false;
     }
     ImGui::End();
     ImGui::PopStyleColor(2);
