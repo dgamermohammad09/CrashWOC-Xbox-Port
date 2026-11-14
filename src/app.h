@@ -4,7 +4,7 @@
 #define NW_APP_NAME "CrashWOC: NuWorld"
 /* The name the UI and the window show: the Xbox build is a beta of its own. */
 #ifdef NW_UWP
-#define NW_APP_TITLE NW_APP_NAME " - Xbox Port Beta"
+#define NW_APP_TITLE NW_APP_NAME " - Xbox Port Beta by Mohammad Aljafari"
 #else
 #define NW_APP_TITLE NW_APP_NAME
 #endif

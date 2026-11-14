@@ -200,7 +200,9 @@ void nw_menu_autosave_loaded(struct cursor_s *cursor)
 
 static const char *nw_menu_desktop(void)
 {
-#if defined(SDL_PLATFORM_WINDOWS)
+#if defined(NW_UWP)
+    return "XBOX";
+#elif defined(SDL_PLATFORM_WINDOWS)
     return "WINDOWS";
 #elif defined(SDL_PLATFORM_MACOS)
     return "MACOS";
@@ -539,6 +541,10 @@ void DrawMenu(struct cursor_s *cursor, s32 paused)
             }
         }
         Text3D(id, -0.95f, 0.9f, 1.0f, 0.3f, 0.3f, 0.3f, 2, 2);
+#ifdef NW_UWP
+        static char credit[] = "XBOX PORT BY MOHAMMAD ALJAFARI";
+        Text3D(credit, -0.95f, 0.82f, 1.0f, 0.3f, 0.3f, 0.3f, 2, 2);
+#endif
     }
     nw_menu_autosave_notice();
 }

@@ -7,7 +7,7 @@
   <Identity Name="NuWorld.CrashWOC" Publisher="CN=NuWorldXbox" Version="@VERSION@" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>CrashWOC: NuWorld (Xbox Port Beta)</DisplayName>
-    <PublisherDisplayName>NuWorld (Xbox port)</PublisherDisplayName>
+    <PublisherDisplayName>Mohammad Aljafari</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   <Dependencies>
@@ -20,7 +20,7 @@
   </Resources>
   <Applications>
     <Application Id="App" Executable="NuWorld.exe" EntryPoint="NuWorld.App">
-      <uap:VisualElements DisplayName="CrashWOC: NuWorld (Xbox Port Beta)" Description="Crash Bandicoot: The Wrath of Cortex, native port (NuWorld)"
+      <uap:VisualElements DisplayName="CrashWOC: NuWorld (Xbox Port Beta)" Description="Crash Bandicoot: The Wrath of Cortex, native port (NuWorld). Xbox port by Mohammad Aljafari"
                           Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"
                           BackgroundColor="#101428">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
