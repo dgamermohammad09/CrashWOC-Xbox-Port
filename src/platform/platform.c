@@ -31,6 +31,14 @@ bool nw_platform_init(NwPlatform *p, const char *title, int width, int height)
 {
     SDL_zerop(p);
 
+#ifdef NW_UWP
+    /* Windows.Gaming.Input is the only controller driver in a UWP app (no XInput/RawInput/HIDAPI), and SDL leaves it
+       off unless asked: without this the Xbox has no controller at all. B stays a game button, not the system's
+       Back (which would leave the app), and the pad is read even when the system says the window is not focused. */
+    SDL_SetHint(SDL_HINT_JOYSTICK_WGI, "1");
+    SDL_SetHint(SDL_HINT_WINRT_HANDLE_BACK_BUTTON, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         nw_platform_fail("SDL could not start");
         return false;

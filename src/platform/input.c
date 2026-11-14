@@ -319,6 +319,16 @@ void nw_input_hold_until_release(void)
 void nw_input_poll(bool keyboard)
 {
     NwPadInput in = { 0, 0x80, 0x80, 0x80, 0x80, 0, 0 };
+    /* A controller connected while the launcher or the setup page ran had its "added" event read there: take the
+       first one present (looked for twice a second, it is cheap). */
+    static uint64_t looked;
+    if (!nw_input_pad && SDL_GetTicks() - looked >= 500) {
+        looked = SDL_GetTicks();
+        nw_input_open_next();
+        if (nw_input_pad) {
+            SDL_Log("input: controller %s", SDL_GetGamepadName(nw_input_pad));
+        }
+    }
     if (nw_input_hold) {
         NwPadInput held = in;
         if (nw_input_pad) {
